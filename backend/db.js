@@ -1,10 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
-
-const DB_DIR = process.env.SASTA_CCTV_DATA_DIR
-  ? path.resolve(process.env.SASTA_CCTV_DATA_DIR)
-  : path.join(__dirname, '..', 'data');
+const { DATA_DIR: DB_DIR } = require('./config');
 const DB_FILE = path.join(DB_DIR, 'database.json');
 // Alert images are deliberately kept outside the public directory.  They are
 // served only after the requesting user has been authorised by the API.

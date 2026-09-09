@@ -52,7 +52,7 @@ install_with_system_manager() {
   fi
 }
 
-printf 'SASTA CCTV setup assistant\n'
+printf 'Vyntrix setup assistant\n'
 printf 'Project: %s\n\n' "$PROJECT_DIR"
 
 case "$OS" in
@@ -82,7 +82,7 @@ else
   if command_exists node; then
     warn "Node.js $(node --version) is too old. Node.js 18+ is required; Node 20 LTS is recommended."
   fi
-  install_with_system_manager node 'Node.js 18+ is required to run SASTA CCTV' || true
+  install_with_system_manager node 'Node.js 18+ is required to run Vyntrix' || true
 fi
 
 if command_exists npm; then
@@ -124,4 +124,4 @@ fi
 printf '\nRunning read-only diagnostics...\n\n'
 npm run doctor || true
 
-printf '\nSetup complete. Start SASTA CCTV with:\n  npm start\n'
+printf '\nSetup complete. Start Vyntrix with:\n  npm start\n'

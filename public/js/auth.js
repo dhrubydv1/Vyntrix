@@ -1,4 +1,4 @@
-// Shared Authentication Manager for SASTA CCTV
+// Shared Authentication Manager for Vyntrix
 
 async function checkSession() {
   try {

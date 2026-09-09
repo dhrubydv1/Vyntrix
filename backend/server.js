@@ -5,9 +5,11 @@ const session = require('express-session');
 const FileStore = require('session-file-store')(session);
 const rateLimit = require('express-rate-limit');
 const path = require('path');
-const db = require('./db');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
+
+const db = require('./db');
+const { DATA_DIR } = require('./config');
 
 const app = express();
 const server = http.createServer(app);
@@ -17,9 +19,6 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3050;
 const isProduction = process.env.NODE_ENV === 'production';
-const DATA_DIR = process.env.SASTA_CCTV_DATA_DIR
-  ? path.resolve(process.env.SASTA_CCTV_DATA_DIR)
-  : path.join(__dirname, '..', 'data');
 
 if (isProduction && !process.env.SESSION_SECRET) {
   throw new Error('SESSION_SECRET must be set when NODE_ENV=production');
@@ -299,7 +298,7 @@ io.on('connection', (socket) => {
 // Run server
 server.listen(PORT, () => {
   console.log(`=========================================`);
-  console.log(`   SASTA CCTV Backend is up and running!`);
+  console.log(`   Vyntrix backend is up and running!`);
   console.log(`   Local Server: http://localhost:${PORT}`);
   console.log(`=========================================`);
 });

@@ -30,7 +30,7 @@ function Install-WithWinget([string]$Id, [string]$Purpose) {
   return $false
 }
 
-Write-Host 'SASTA CCTV setup assistant'
+Write-Host 'Vyntrix setup assistant'
 Write-Host "Project: $ProjectDir`n"
 
 if ($env:OS -ne 'Windows_NT') {
@@ -56,7 +56,7 @@ if ($nodeMajor -ge 18) {
   if ($nodeMajor -ne 20) { Write-Warn 'Node 20 LTS is recommended; Node 18+ is supported.' }
 } else {
   if (Has-Command 'node') { Write-Warn "Node.js $((node --version).Trim()) is too old. Node 18+ is required." }
-  Install-WithWinget 'OpenJS.NodeJS.LTS' 'Node.js 18+ is required to run SASTA CCTV' | Out-Null
+  Install-WithWinget 'OpenJS.NodeJS.LTS' 'Node.js 18+ is required to run Vyntrix' | Out-Null
 }
 
 if (Has-Command 'npm') {
@@ -93,4 +93,4 @@ if (Test-Path '.env.local') {
 Write-Host "`nRunning read-only diagnostics...`n"
 npm run doctor
 
-Write-Host "`nSetup complete. Start SASTA CCTV with:`n  npm start"
+Write-Host "`nSetup complete. Start Vyntrix with:`n  npm start"

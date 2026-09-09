@@ -8,7 +8,7 @@ const path = require('path');
 
 // We'll build a lightweight test server using the same route logic
 const TEST_DB_DIR = path.join(__dirname, '..', 'data', 'api-test');
-process.env.SASTA_CCTV_DATA_DIR = TEST_DB_DIR;
+process.env.VYNTRIX_DATA_DIR = TEST_DB_DIR;
 const db = require('../backend/db');
 
 const app = express();

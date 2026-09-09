@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /*
- * Read-only local environment diagnostics for SASTA CCTV.
+ * Read-only local environment diagnostics for Vyntrix.
  * This script intentionally does not install, create, edit, or delete files.
  */
 const fs = require('fs');
@@ -62,7 +62,7 @@ function section(title) {
   console.log(`\n${title}`);
 }
 
-console.log('SASTA CCTV environment doctor');
+console.log('Vyntrix environment doctor');
 console.log(`Project: ${projectRoot}`);
 
 section('System');
@@ -82,7 +82,7 @@ const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10);
 if (nodeMajor >= 18) {
   ok(`Node.js: ${nodeVersion}${nodeMajor === 20 ? ' (recommended LTS line)' : ' (Node 20 LTS recommended)'}`);
 } else {
-  fail(`Node.js ${nodeVersion} is too old. SASTA CCTV requires Node.js 18 or newer; Node 20 LTS is recommended.`);
+  fail(`Node.js ${nodeVersion} is too old. Vyntrix requires Node.js 18 or newer; Node 20 LTS is recommended.`);
 }
 
 const npmVersion = commandVersion(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--version']);
@@ -94,7 +94,7 @@ const lockPath = path.join(projectRoot, 'package-lock.json');
 const nodeModulesPath = path.join(projectRoot, 'node_modules');
 
 if (!fs.existsSync(packagePath)) {
-  fail('package.json is missing; this does not appear to be a complete SASTA CCTV checkout.');
+  fail('package.json is missing; this does not appear to be a complete Vyntrix checkout.');
 } else {
   ok('package.json found.');
 }
@@ -153,8 +153,11 @@ if (effectiveEnv.PORT) {
   ok('PORT is not set; the application will use 3050.');
 }
 
-if (effectiveEnv.SASTA_CCTV_DATA_DIR) {
-  ok(`SASTA_CCTV_DATA_DIR is configured: ${effectiveEnv.SASTA_CCTV_DATA_DIR}`);
+const configuredDataDir = effectiveEnv.VYNTRIX_DATA_DIR || effectiveEnv.SASTA_CCTV_DATA_DIR;
+if (effectiveEnv.VYNTRIX_DATA_DIR) {
+  ok(`VYNTRIX_DATA_DIR is configured: ${effectiveEnv.VYNTRIX_DATA_DIR}`);
+} else if (effectiveEnv.SASTA_CCTV_DATA_DIR) {
+  warn(`SASTA_CCTV_DATA_DIR is configured for compatibility: ${effectiveEnv.SASTA_CCTV_DATA_DIR}. Prefer VYNTRIX_DATA_DIR for new deployments.`);
 } else {
   ok('Runtime data will use the default ./data directory.');
 }
@@ -168,8 +171,8 @@ for (const legacyVariable of ['DATABASE_URL', 'BLOB_READ_WRITE_TOKEN', 'ABLY_API
 }
 
 section('Runtime directories');
-const dataDirectory = effectiveEnv.SASTA_CCTV_DATA_DIR
-  ? path.resolve(projectRoot, effectiveEnv.SASTA_CCTV_DATA_DIR)
+const dataDirectory = configuredDataDir
+  ? path.resolve(projectRoot, configuredDataDir)
   : path.join(projectRoot, 'data');
 if (fs.existsSync(dataDirectory)) {
   try {
@@ -184,11 +187,11 @@ if (fs.existsSync(dataDirectory)) {
 
 section('Summary');
 if (requiredProblems) {
-  fail(`${requiredProblems} required problem${requiredProblems === 1 ? '' : 's'} found. Fix the items above before starting SASTA CCTV.`);
+  fail(`${requiredProblems} required problem${requiredProblems === 1 ? '' : 's'} found. Fix the items above before starting Vyntrix.`);
 } else {
   ok('No required setup problems found.');
 }
 if (warnings) warn(`${warnings} optional configuration warning${warnings === 1 ? '' : 's'} found.`);
-console.log('\nStart SASTA CCTV with: npm start');
+console.log('\nStart Vyntrix with: npm start');
 
 process.exitCode = requiredProblems ? 1 : 0;

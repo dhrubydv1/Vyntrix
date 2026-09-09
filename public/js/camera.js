@@ -1,4 +1,4 @@
-// Camera Console Logic - SASTA CCTV
+// Camera Console Logic - Vyntrix
 
 let socket;
 let localStream = null;

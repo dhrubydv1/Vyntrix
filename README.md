@@ -1,7 +1,7 @@
-# SASTA CCTV
+# Vyntrix
 
-SASTA CCTV is a browser-based DIY camera system. Sign in on one device as a
-**Camera** and on another as a **Monitor** to view live video/audio, use
+Vyntrix is a browser-based security camera platform for repurposing everyday
+devices. Sign in on one device as a **Camera** and on another as a **Monitor** to view live video/audio, use
 push-to-talk, detect motion, save motion snapshots, trigger a siren, and review
 the alert history. It is designed for reusing an old phone, tablet, laptop, or
 desktop webcam as a camera.
@@ -61,7 +61,7 @@ Run a read-only environment report at any time:
 npm run doctor
 ```
 
-The exact command to start SASTA CCTV is:
+The exact command to start Vyntrix is:
 
 ```bash
 npm start
@@ -111,10 +111,13 @@ PORT=8080 SESSION_SECRET='replace-with-a-long-random-secret' npm start
 | `PORT` | `3050` | HTTP port for the application. |
 | `SESSION_SECRET` | development fallback | Secret used to sign login sessions. It is required when `NODE_ENV=production`. |
 | `NODE_ENV` | unset | Set to `production` behind HTTPS so session cookies are marked secure. |
+| `VYNTRIX_DATA_DIR` | `./data` | Optional directory for runtime JSON data, alert images, and sessions. |
 
 Copy `.env.example` to `.env.local` when you need to customize the port or
-session secret; it is loaded automatically at startup. Never commit `.env.local`
-or any credentials.
+session secret or move runtime data to another directory; it is loaded
+automatically at startup. Existing deployments may continue using the
+deprecated `SASTA_CCTV_DATA_DIR`, which is used when `VYNTRIX_DATA_DIR` is not
+set. Never commit `.env.local` or any credentials.
 
 ## Architecture
 

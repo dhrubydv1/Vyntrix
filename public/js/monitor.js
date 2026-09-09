@@ -1,4 +1,4 @@
-// Monitor Dashboard Logic - SASTA CCTV
+// Monitor Dashboard Logic - Vyntrix
 
 let socket;
 let userId = null;
@@ -230,7 +230,7 @@ function renderCameraSelectionGrid(cameras) {
       <div style="grid-column: span 3; text-align: center; padding: 3rem; background: var(--bg-card); border: 1px dashed var(--border-color); border-radius: var(--radius-md);">
         <div style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.6;">📹</div>
         <h4 style="margin-bottom: 0.5rem;">No Cameras Online</h4>
-        <p style="color: var(--text-secondary); font-size: 0.9rem; max-width: 420px; margin: 0 auto 1.5rem auto;">To start monitoring, open SASTA CCTV on another phone or computer, name the camera, and click **Start Camera**.</p>
+        <p style="color: var(--text-secondary); font-size: 0.9rem; max-width: 420px; margin: 0 auto 1.5rem auto;">To start monitoring, open Vyntrix on another phone or computer, name the camera, and click **Start Camera**.</p>
         <a href="/camera.html" target="_blank" class="btn btn-glass">Open Camera Console</a>
       </div>
     `;
