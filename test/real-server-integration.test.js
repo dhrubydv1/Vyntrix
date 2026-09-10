@@ -72,10 +72,12 @@ function waitForEvent(socket, eventName, timeoutMs = 1000) {
   });
 }
 
-function connectSocket(cookie) {
+function connectSocket(cookie, { reconnection = false } = {}) {
   const socket = io(baseUrl, {
     transports: ['websocket'],
-    reconnection: false,
+    reconnection,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 50,
     ...(cookie ? { extraHeaders: { Cookie: cookie } } : {})
   });
   sockets.add(socket);
@@ -89,6 +91,24 @@ function connectSocket(cookie) {
       clearTimeout(timer);
       reject(error);
     });
+  });
+}
+
+function waitForCameraList(socket, predicate, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off('camera-list-update', onUpdate);
+      reject(new Error('Timed out waiting for the expected camera list'));
+    }, timeoutMs);
+
+    function onUpdate(cameras) {
+      if (!predicate(cameras)) return;
+      clearTimeout(timer);
+      socket.off('camera-list-update', onUpdate);
+      resolve(cameras);
+    }
+
+    socket.on('camera-list-update', onUpdate);
   });
 }
 
@@ -228,6 +248,32 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.strictEqual(receivedSignal, false);
     assert.strictEqual(receivedSiren, false);
+  });
+
+  it('removes stale camera registrations and supports authenticated reconnect registration', async () => {
+    const user = await register(`socket_reconnect_${Date.now()}`);
+    const camera = await connectSocket(user.cookie, { reconnection: true });
+    const monitor = await connectSocket(user.cookie);
+    const cameraName = 'Reconnect Camera';
+
+    await registerDevice(camera, 'camera', cameraName);
+    await registerDevice(monitor, 'monitor');
+    const oldSocketId = camera.id;
+
+    camera.on('connect', () => {
+      if (camera.id !== oldSocketId) {
+        camera.emit('register-device', { type: 'camera', cameraName });
+      }
+    });
+
+    const refreshedList = waitForCameraList(monitor, (cameras) => (
+      cameras.length === 1 && cameras[0].cameraName === cameraName && cameras[0].socketId !== oldSocketId
+    ));
+    camera.io.engine.close();
+    const cameras = await refreshedList;
+
+    assert.strictEqual(cameras.length, 1);
+    assert.notStrictEqual(cameras[0].socketId, oldSocketId);
   });
 });
 

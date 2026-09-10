@@ -6,6 +6,9 @@ let activeCameraSocketId = null;
 let activeCameraName = null;
 let peerConnection = null;
 let userNavigatedBack = false;
+let availableCameras = [];
+let monitorConnectionAttempt = 0;
+let monitorReconnectTimer = null;
 
 // Audio variables for Walkie Talkie mic
 let micStream = null;
@@ -130,26 +133,39 @@ function connectSocket() {
 
   socket.on('connect', () => {
     console.log('Connected to signaling server');
+    updateMonitorStatus(activeCameraSocketId ? 'reconnecting' : 'connecting');
     socket.emit('register-device', {
       type: 'monitor'
     });
   });
 
+  socket.on('disconnect', () => {
+    console.warn('Signaling server disconnected');
+    cleanupPeerConnection();
+    if (activeCameraSocketId) updateMonitorStatus('reconnecting');
+  });
+
   // Camera devices update in workspace
   socket.on('camera-list-update', (cameras) => {
+    availableCameras = Array.isArray(cameras) ? cameras : [];
     renderCameraSelectionGrid(cameras);
+    reconnectToSelectedCamera();
   });
 
   // Signal feedback from camera
   socket.on('webrtc-signal', async ({ senderSocketId, signalData }) => {
     if (senderSocketId !== activeCameraSocketId) return;
 
+    if (!peerConnection || peerConnection.connectionState === 'closed') return;
+    const signalPeer = peerConnection;
+
     try {
       if (signalData.answer) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(signalData.answer));
+        await signalPeer.setRemoteDescription(new RTCSessionDescription(signalData.answer));
         console.log('WebRTC connection established with camera answer');
       } else if (signalData.candidate) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(signalData.candidate));
+        if (peerConnection !== signalPeer) return;
+        await signalPeer.addIceCandidate(new RTCIceCandidate(signalData.candidate));
       }
     } catch (err) {
       console.error('Failed to process incoming WebRTC signal:', err);
@@ -236,7 +252,9 @@ function renderCameraSelectionGrid(cameras) {
     `;
     // If active camera went offline, return to list view
     if (activeCameraSocketId) {
-      backToCameraList();
+      cleanupPeerConnection();
+      activeCameraSocketId = null;
+      updateMonitorStatus('reconnecting');
     }
     return;
   }
@@ -266,10 +284,66 @@ function renderCameraSelectionGrid(cameras) {
   });
 }
 
+function updateMonitorStatus(status) {
+  const indicator = document.querySelector('.stream-status .status-indicator');
+  const text = document.getElementById('monitor-connection-status');
+  if (!indicator || !text) return;
+
+  indicator.className = 'status-indicator';
+  const labels = {
+    connecting: 'CONNECTING',
+    live: 'LIVE',
+    reconnecting: 'RECONNECTING',
+    disconnected: 'DISCONNECTED',
+    failed: 'FAILED'
+  };
+  indicator.classList.add(status === 'live' ? 'streaming' : 'idle');
+  text.innerText = labels[status] || 'DISCONNECTED';
+}
+
+function cleanupPeerConnection() {
+  monitorConnectionAttempt += 1;
+  if (monitorReconnectTimer) {
+    clearTimeout(monitorReconnectTimer);
+    monitorReconnectTimer = null;
+  }
+  if (peerConnection) {
+    const stalePeer = peerConnection;
+    peerConnection = null;
+    stalePeer.onicecandidate = null;
+    stalePeer.ontrack = null;
+    stalePeer.onconnectionstatechange = null;
+    stalePeer.oniceconnectionstatechange = null;
+    stalePeer.close();
+  }
+  const videoEl = document.getElementById('remote-video');
+  if (videoEl) videoEl.srcObject = null;
+}
+
+function reconnectToSelectedCamera() {
+  if (!activeCameraName || !socket || !socket.connected || peerConnection) return;
+  const camera = availableCameras.find(item => item.cameraName === activeCameraName);
+  if (!camera) {
+    activeCameraSocketId = null;
+    updateMonitorStatus('disconnected');
+    return;
+  }
+  activeCameraSocketId = camera.socketId;
+  initiateStreaming(camera.socketId, camera.cameraName, true);
+}
+
 // Initiate peer collection & stream setup
-async function initiateStreaming(socketId, name) {
+async function initiateStreaming(socketId, name, isReconnect = false) {
+  if (!socket || !socket.connected) {
+    updateMonitorStatus('reconnecting');
+    return;
+  }
+  if (peerConnection && activeCameraSocketId === socketId) return;
+  cleanupPeerConnection();
+  const attempt = ++monitorConnectionAttempt;
   activeCameraSocketId = socketId;
   activeCameraName = name;
+  updateMonitorStatus(isReconnect ? 'reconnecting' : 'connecting');
 
   // Swap view states
   document.getElementById('camera-selection-view').style.display = 'none';
@@ -296,6 +370,8 @@ async function initiateStreaming(socketId, name) {
     micTrack = null;
   }
 
+  if (attempt !== monitorConnectionAttempt || !activeCameraSocketId) return;
+
   // Create Peer Connection
   peerConnection = new RTCPeerConnection({
     iceServers: [
@@ -311,9 +387,9 @@ async function initiateStreaming(socketId, name) {
 
   // Gather ICE candidates
   peerConnection.onicecandidate = (event) => {
-    if (event.candidate && socket) {
+    if (event.candidate && socket && socket.connected && peerConnection === thisPeer && attempt === monitorConnectionAttempt) {
       socket.emit('webrtc-signal', {
-        targetSocketId: activeCameraSocketId,
+        targetSocketId: socketId,
         signalData: { candidate: event.candidate }
       });
     }
@@ -327,12 +403,22 @@ async function initiateStreaming(socketId, name) {
     }
   };
 
+  const thisPeer = peerConnection;
   peerConnection.oniceconnectionstatechange = () => {
-    console.log(`ICE Connection State: ${peerConnection.iceConnectionState}`);
-    if (peerConnection.iceConnectionState === 'disconnected' || peerConnection.iceConnectionState === 'closed') {
-      console.log('Camera disconnected');
-      backToCameraList();
-    }
+    const state = thisPeer.iceConnectionState;
+    console.log(`ICE Connection State: ${state}`);
+    if (state === 'disconnected') updateMonitorStatus('reconnecting');
+    if (state === 'failed') handlePeerFailure(thisPeer, 'failed');
+    if (state === 'closed') handlePeerFailure(thisPeer, 'disconnected');
+  };
+
+  peerConnection.onconnectionstatechange = () => {
+    const state = thisPeer.connectionState;
+    if (state === 'connected') updateMonitorStatus('live');
+    else if (state === 'connecting' || state === 'new') updateMonitorStatus('connecting');
+    else if (state === 'disconnected') updateMonitorStatus('reconnecting');
+    else if (state === 'failed') handlePeerFailure(thisPeer, 'failed');
+    else if (state === 'closed') handlePeerFailure(thisPeer, 'disconnected');
   };
 
   // Create Offer
@@ -340,8 +426,9 @@ async function initiateStreaming(socketId, name) {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
     
+    if (attempt !== monitorConnectionAttempt || !socket.connected || peerConnection !== thisPeer) return;
     socket.emit('webrtc-signal', {
-      targetSocketId: activeCameraSocketId,
+      targetSocketId: socketId,
       signalData: { offer }
     });
   } catch (err) {
@@ -349,7 +436,18 @@ async function initiateStreaming(socketId, name) {
   }
 }
 
+function handlePeerFailure(peer, status) {
+  if (peerConnection !== peer) return;
+  cleanupPeerConnection();
+  updateMonitorStatus(status);
+  if (activeCameraName && socket && socket.connected) {
+    updateMonitorStatus('reconnecting');
+    monitorReconnectTimer = setTimeout(reconnectToSelectedCamera, 500);
+  }
+}
+
 function backToCameraList() {
+  const hadActiveCamera = Boolean(activeCameraSocketId);
   activeCameraSocketId = null;
   activeCameraName = null;
   userNavigatedBack = true; // Block auto-connecting until reset
@@ -359,10 +457,7 @@ function backToCameraList() {
   if (videoEl) videoEl.srcObject = null;
 
   // Clean WebRTC
-  if (peerConnection) {
-    peerConnection.close();
-    peerConnection = null;
-  }
+  cleanupPeerConnection();
 
   // Clean Microphone stream
   if (micStream) {
@@ -374,6 +469,7 @@ function backToCameraList() {
   // Swap view states
   document.getElementById('monitor-portal-view').style.display = 'none';
   document.getElementById('camera-selection-view').style.display = 'block';
+  updateMonitorStatus(hadActiveCamera ? 'disconnected' : 'connecting');
 }
 
 // Fetch historical alert logs from database

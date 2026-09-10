@@ -12,7 +12,10 @@ const peerConnections = {};
 // Motion Detection Variables
 let prevFrameData = null;
 let motionIntervalId = null;
+let motionDetectionEnabled = false;
 let alertCooldown = false;
+let alertCooldownTimeoutId = null;
+let motionAlertController = null;
 const MOTION_COOLDOWN_MS = 10000; // 10 seconds cooldown between uploads
 
 // Audio Synth Alarm (Siren)
@@ -54,6 +57,18 @@ function setupDOMListeners() {
   // Motion settings update
   const sensitivitySlider = document.getElementById('motion-sensitivity');
   const sensitivityValText = document.getElementById('sensitivity-val');
+  const motionToggle = document.getElementById('toggle-motion');
+
+  motionDetectionEnabled = motionToggle.checked;
+  motionToggle.addEventListener('change', (e) => {
+    motionDetectionEnabled = e.target.checked;
+    if (motionDetectionEnabled && isStreaming) {
+      startMotionDetection();
+    } else if (!motionDetectionEnabled) {
+      stopMotionDetection();
+    }
+  });
+
   sensitivitySlider.addEventListener('input', (e) => {
     const val = parseInt(e.target.value);
     if (val <= 20) sensitivityValText.innerText = 'High (Very Sensitive)';
@@ -163,6 +178,10 @@ async function startCamera() {
       video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
       audio: true
     });
+
+    localStream.getTracks().forEach((track) => {
+      track.addEventListener('ended', handleLocalStreamEnded);
+    });
     
     const previewEl = document.getElementById('webcam-preview');
     previewEl.srcObject = localStream;
@@ -208,8 +227,7 @@ function stopCamera() {
 
   // Clean up all WebRTC peers
   Object.keys(peerConnections).forEach(monitorId => {
-    peerConnections[monitorId].close();
-    delete peerConnections[monitorId];
+    cleanPeer(monitorId);
   });
 
   // Stop siren
@@ -223,6 +241,10 @@ function stopCamera() {
   
   isStreaming = false;
   updateCameraStatus('offline');
+}
+
+function handleLocalStreamEnded() {
+  if (isStreaming) stopCamera();
 }
 
 function updateCameraStatus(status) {
@@ -245,33 +267,45 @@ function updateCameraStatus(status) {
 // Socket IO setup
 function connectSocket() {
   socket = io();
+  const signalingSocket = socket;
   
-  socket.on('connect', () => {
+  signalingSocket.on('connect', () => {
     console.log('Connected to signaling server');
-    socket.emit('register-device', {
+    signalingSocket.emit('register-device', {
       type: 'camera',
       cameraName
     });
   });
 
+  signalingSocket.on('disconnect', () => {
+    console.warn('Signaling server disconnected; cleaning stale monitor peers');
+    Object.keys(peerConnections).forEach(cleanPeer);
+  });
+
   // Relay signals
-  socket.on('webrtc-signal', async ({ senderSocketId, signalData }) => {
+  signalingSocket.on('webrtc-signal', async ({ senderSocketId, signalData }) => {
     try {
       let pc = peerConnections[senderSocketId];
+      if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.iceConnectionState === 'failed')) {
+        cleanPeer(senderSocketId);
+        pc = null;
+      }
       if (!pc) {
-        pc = createPeerConnection(senderSocketId);
+        pc = createPeerConnection(senderSocketId, signalingSocket);
       }
 
       if (signalData.offer) {
         await pc.setRemoteDescription(new RTCSessionDescription(signalData.offer));
+        if (peerConnections[senderSocketId] !== pc || !signalingSocket.connected) return;
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
-        
-        socket.emit('webrtc-signal', {
+        if (peerConnections[senderSocketId] !== pc || !signalingSocket.connected) return;
+        signalingSocket.emit('webrtc-signal', {
           targetSocketId: senderSocketId,
           signalData: { answer }
         });
       } else if (signalData.candidate) {
+        if (peerConnections[senderSocketId] !== pc || !signalingSocket.connected) return;
         await pc.addIceCandidate(new RTCIceCandidate(signalData.candidate));
       }
     } catch (err) {
@@ -289,7 +323,7 @@ function connectSocket() {
   });
 }
 
-function createPeerConnection(monitorSocketId) {
+function createPeerConnection(monitorSocketId, signalingSocket = socket) {
   console.log('Creating RTCPeerConnection for monitor:', monitorSocketId);
   
   const pc = new RTCPeerConnection({
@@ -306,8 +340,8 @@ function createPeerConnection(monitorSocketId) {
 
   // ICE candidates
   pc.onicecandidate = (event) => {
-    if (event.candidate && socket) {
-      socket.emit('webrtc-signal', {
+    if (event.candidate && signalingSocketIsActive(signalingSocket, monitorSocketId, pc)) {
+      signalingSocket.emit('webrtc-signal', {
         targetSocketId: monitorSocketId,
         signalData: { candidate: event.candidate }
       });
@@ -334,8 +368,16 @@ function createPeerConnection(monitorSocketId) {
   };
 
   pc.oniceconnectionstatechange = () => {
-    console.log(`ICE connection state for ${monitorSocketId}: ${pc.iceConnectionState}`);
-    if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'closed') {
+    const state = pc.iceConnectionState;
+    console.log(`ICE connection state for ${monitorSocketId}: ${state}`);
+    if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+      cleanPeer(monitorSocketId);
+    }
+  };
+
+  pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
+    if (state === 'failed' || state === 'disconnected' || state === 'closed') {
       cleanPeer(monitorSocketId);
     }
   };
@@ -344,9 +386,17 @@ function createPeerConnection(monitorSocketId) {
   return pc;
 }
 
+function signalingSocketIsActive(currentSocket, monitorSocketId, pc) {
+  return Boolean(currentSocket && currentSocket.connected && peerConnections[monitorSocketId] === pc);
+}
+
 function cleanPeer(monitorSocketId) {
   const pc = peerConnections[monitorSocketId];
   if (pc) {
+    pc.onicecandidate = null;
+    pc.ontrack = null;
+    pc.oniceconnectionstatechange = null;
+    pc.onconnectionstatechange = null;
     pc.close();
     delete peerConnections[monitorSocketId];
   }
@@ -359,6 +409,8 @@ function cleanPeer(monitorSocketId) {
 
 // Client-Side Motion Detection Engine
 function startMotionDetection() {
+  if (!isStreaming || !motionDetectionEnabled || motionIntervalId) return;
+
   const video = document.getElementById('webcam-preview');
   const outputCanvas = document.getElementById('motion-canvas');
   const outCtx = outputCanvas.getContext('2d');
@@ -370,7 +422,7 @@ function startMotionDetection() {
   const procCtx = processingCanvas.getContext('2d');
 
   motionIntervalId = setInterval(() => {
-    if (!isStreaming || video.paused || video.ended || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
+    if (!motionDetectionEnabled || !isStreaming || video.paused || video.ended || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return;
 
     // Set output overlay canvas resolution
     outputCanvas.width = video.videoWidth;
@@ -411,6 +463,18 @@ function stopMotionDetection() {
     motionIntervalId = null;
   }
   prevFrameData = null;
+  alertCooldown = false;
+
+  if (alertCooldownTimeoutId) {
+    clearTimeout(alertCooldownTimeoutId);
+    alertCooldownTimeoutId = null;
+  }
+
+  if (motionAlertController) {
+    motionAlertController.abort();
+    motionAlertController = null;
+  }
+
   hideMotionWarning();
   
   const canvas = document.getElementById('motion-canvas');
@@ -490,15 +554,21 @@ function showMotionWarning() {
 }
 
 function hideMotionWarning() {
+  if (warningTimeout) {
+    clearTimeout(warningTimeout);
+    warningTimeout = null;
+  }
   const el = document.getElementById('motion-warning');
   if (el) el.style.display = 'none';
 }
 
 // Upload motion alerts to the backend
 async function triggerMotionAlert() {
-  if (alertCooldown) return;
+  if (!isStreaming || !motionDetectionEnabled || alertCooldown) return;
   
   alertCooldown = true;
+  const controller = new AbortController();
+  motionAlertController = controller;
   console.log('Motion alert triggered! Capturing snapshot...');
   
   // Auto Siren Trigger
@@ -507,6 +577,8 @@ async function triggerMotionAlert() {
   }
 
   try {
+    if (!isStreaming || !motionDetectionEnabled) return;
+
     const video = document.getElementById('webcam-preview');
     
     // Draw high-resolution snapshot
@@ -519,11 +591,14 @@ async function triggerMotionAlert() {
     // Export image as jpeg
     const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.65);
 
+    if (!isStreaming || !motionDetectionEnabled) return;
+
     // Send to backend
     const res = await fetch('/api/alerts/upload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
+      signal: controller.signal,
       body: JSON.stringify({
         cameraName,
         image: dataUrl
@@ -535,13 +610,23 @@ async function triggerMotionAlert() {
       console.log('Motion snapshot successfully uploaded:', result.alert.imagePath);
     }
   } catch (err) {
-    console.error('Failed to upload motion alert snapshot:', err);
-  }
+    if (err.name !== 'AbortError') {
+      console.error('Failed to upload motion alert snapshot:', err);
+    }
+  } finally {
+    if (motionAlertController === controller) {
+      motionAlertController = null;
+    }
 
-  // Enforce upload rate limiting
-  setTimeout(() => {
-    alertCooldown = false;
-  }, MOTION_COOLDOWN_MS);
+    if (isStreaming && motionDetectionEnabled) {
+      alertCooldownTimeoutId = setTimeout(() => {
+        alertCooldown = false;
+        alertCooldownTimeoutId = null;
+      }, MOTION_COOLDOWN_MS);
+    } else {
+      alertCooldown = false;
+    }
+  }
 }
 
 // Initialise on load
