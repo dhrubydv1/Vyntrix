@@ -5,6 +5,7 @@ let localStream = null;
 let userId = null;
 let cameraName = 'Camera';
 let isStreaming = false;
+let iceServers = null;
 
 // WebRTC connections map: monitorSocketId -> RTCPeerConnection
 const peerConnections = {};
@@ -194,7 +195,10 @@ async function startCamera() {
     
     isStreaming = true;
     updateCameraStatus('streaming');
-    
+
+    iceServers = await getIceServers();
+    if (!isStreaming) return;
+
     // Establish Socket.io connection
     connectSocket();
     
@@ -327,10 +331,7 @@ function createPeerConnection(monitorSocketId, signalingSocket = socket) {
   console.log('Creating RTCPeerConnection for monitor:', monitorSocketId);
   
   const pc = new RTCPeerConnection({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+    iceServers
   });
 
   // Attach local tracks

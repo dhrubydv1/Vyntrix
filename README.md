@@ -115,6 +115,10 @@ PORT=8080 SESSION_SECRET='replace-with-a-long-random-secret' npm start
 | `VYNTRIX_ALERT_MAX_IMAGE_BYTES` | `2097152` | Maximum decoded alert image size; maximum supported value is 2 MB. |
 | `VYNTRIX_MAX_ALERTS_PER_USER` | `100` | Maximum retained alerts per user; oldest alerts are removed when the limit is reached. |
 | `VYNTRIX_ALERT_UPLOAD_LIMIT` | `60` | Maximum alert uploads per user during the configured window. |
+| `VYNTRIX_STUN_URLS` | Google STUN defaults | Comma- or space-separated STUN URLs. |
+| `VYNTRIX_TURN_URLS` | unset | Optional comma- or space-separated TURN/TURNS URLs. |
+| `VYNTRIX_TURN_USERNAME` | unset | TURN username; required with TURN URLs. |
+| `VYNTRIX_TURN_CREDENTIAL` | unset | TURN credential; required with TURN URLs. |
 | `VYNTRIX_ALERT_UPLOAD_WINDOW_MS` | `900000` | Alert upload rate-limit window in milliseconds (15 minutes). |
 
 Copy `.env.example` to `.env.local` when you need to customize the port or
@@ -179,11 +183,12 @@ Live media is peer-to-peer WebRTC. The included public STUN servers work on
 many home and office networks, but not all of them. Remote streams can fail on
 carrier-grade NAT, restrictive corporate Wi-Fi, or firewalls that block WebRTC.
 
-For reliable public/production remote viewing, configure your own authenticated
-TURN server and replace the `iceServers` settings in:
-
-- `public/js/camera.js`
-- `public/js/monitor.js`
+For reliable public/production remote viewing, configure an authenticated TURN
+server with the `VYNTRIX_TURN_*` settings in `.env.local`. The backend provides
+the normalized ICE configuration to authenticated camera and monitor pages; TURN
+credentials are not stored in frontend source code. Static credentials are
+visible to the authenticated browser because WebRTC requires them, so use
+short-lived TURN credentials when the TURN provider supports them.
 
 The application server only handles login, device discovery, alerts, and WebRTC
 signalling; it does not relay the video stream by itself.

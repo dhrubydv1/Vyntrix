@@ -12,7 +12,8 @@ const db = require('./db');
 const {
   DATA_DIR,
   ALERT_UPLOAD_LIMIT,
-  ALERT_UPLOAD_WINDOW_MS
+  ALERT_UPLOAD_WINDOW_MS,
+  ICE_SERVERS
 } = require('./config');
 
 const app = express();
@@ -163,6 +164,13 @@ const requireAuth = (req, res, next) => {
   }
   next();
 };
+
+// ICE credentials are returned only to an authenticated browser that needs to
+// establish a peer connection. Do not log this response; future deployments
+// should replace the static credential with a short-lived TURN credential.
+app.get('/api/webrtc/ice-servers', requireAuth, (req, res) => {
+  res.json({ iceServers: ICE_SERVERS });
+});
 
 // Device APIs
 app.get('/api/devices/active-cameras', requireAuth, (req, res) => {

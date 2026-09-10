@@ -9,6 +9,7 @@ let userNavigatedBack = false;
 let availableCameras = [];
 let monitorConnectionAttempt = 0;
 let monitorReconnectTimer = null;
+let iceServers = null;
 
 // Audio variables for Walkie Talkie mic
 let micStream = null;
@@ -33,6 +34,7 @@ async function init() {
   
   setupDOMListeners();
   setupTimeCounter();
+  iceServers = await getIceServers();
   connectSocket();
 }
 
@@ -374,10 +376,7 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
 
   // Create Peer Connection
   peerConnection = new RTCPeerConnection({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' }
-    ]
+    iceServers
   });
 
   // Attach Microphone track if available

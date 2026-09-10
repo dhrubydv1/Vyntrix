@@ -190,6 +190,21 @@ describe('Actual Vyntrix server HTTP integration', () => {
     assert.strictEqual(response.status, 401);
     assert.deepStrictEqual(response.body, { error: 'Unauthorized' });
   });
+
+  it('serves only the normalized ICE configuration to authenticated clients', async () => {
+    const user = await register(`ice_${Date.now()}`);
+    const response = await request('GET', '/api/webrtc/ice-servers', null, user.cookie);
+    assert.strictEqual(response.status, 200);
+    assert.ok(Array.isArray(response.body.iceServers));
+    assert.ok(response.body.iceServers.length >= 1);
+    assert.ok(!JSON.stringify(response.body).includes('SESSION_SECRET'));
+    assert.deepStrictEqual(Object.keys(response.body), ['iceServers']);
+  });
+
+  it('protects the ICE configuration endpoint', async () => {
+    const response = await request('GET', '/api/webrtc/ice-servers');
+    assert.strictEqual(response.status, 401);
+  });
 });
 
 describe('Actual Vyntrix server Socket.IO integration', () => {

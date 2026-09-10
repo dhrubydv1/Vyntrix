@@ -1,5 +1,10 @@
 const path = require('path');
 
+const DEFAULT_STUN_URLS = [
+  'stun:stun.l.google.com:19302',
+  'stun:stun1.l.google.com:19302'
+];
+
 // VYNTRIX_DATA_DIR is the current setting. Keep the legacy variable as a
 // fallback so existing deployments continue using their current data store.
 const configuredDataDir = process.env.VYNTRIX_DATA_DIR || process.env.SASTA_CCTV_DATA_DIR;
@@ -14,6 +19,35 @@ function readPositiveInteger(name, fallback, maximum) {
   }
   return value;
 }
+
+function readIceUrls(name, fallback, protocols) {
+  const rawValue = process.env[name];
+  if (typeof rawValue !== 'string') return fallback;
+  if (rawValue === undefined || rawValue.trim() === '') return fallback;
+
+  const urls = rawValue.split(/[\s,]+/).map(value => value.trim()).filter(Boolean);
+  if (!urls.length || urls.some(url => !protocols.some(protocol => url.startsWith(protocol)))) {
+    throw new Error(`${name} must contain valid ${protocols.join(' or ')} URLs`);
+  }
+  return [...new Set(urls)];
+}
+
+const STUN_URLS = readIceUrls('VYNTRIX_STUN_URLS', DEFAULT_STUN_URLS, ['stun:']);
+const TURN_URLS = readIceUrls('VYNTRIX_TURN_URLS', [], ['turn:', 'turns:']);
+const TURN_USERNAME = (process.env.VYNTRIX_TURN_USERNAME || '').trim();
+const TURN_CREDENTIAL = process.env.VYNTRIX_TURN_CREDENTIAL || '';
+
+if ((TURN_USERNAME && !TURN_CREDENTIAL) || (!TURN_USERNAME && TURN_CREDENTIAL)) {
+  throw new Error('VYNTRIX_TURN_USERNAME and VYNTRIX_TURN_CREDENTIAL must be configured together');
+}
+if (TURN_URLS.length && (!TURN_USERNAME || !TURN_CREDENTIAL)) {
+  throw new Error('VYNTRIX_TURN_USERNAME and VYNTRIX_TURN_CREDENTIAL are required when VYNTRIX_TURN_URLS is configured');
+}
+
+const ICE_SERVERS = [
+  { urls: STUN_URLS },
+  ...(TURN_URLS.length ? [{ urls: TURN_URLS, username: TURN_USERNAME, credential: TURN_CREDENTIAL }] : [])
+];
 
 const DATA_DIR = configuredDataDir
   ? path.resolve(configuredDataDir)
@@ -45,5 +79,6 @@ module.exports = {
   MAX_ALERT_IMAGE_BYTES,
   MAX_ALERTS_PER_USER,
   ALERT_UPLOAD_LIMIT,
-  ALERT_UPLOAD_WINDOW_MS
+  ALERT_UPLOAD_WINDOW_MS,
+  ICE_SERVERS
 };
