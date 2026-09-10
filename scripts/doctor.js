@@ -62,6 +62,28 @@ function section(title) {
   console.log(`\n${title}`);
 }
 
+function validateDatabaseShape(candidate) {
+  return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+    && Array.isArray(candidate.users) && Array.isArray(candidate.alerts)
+    && candidate.users.every(user => user && typeof user.id === 'string'
+      && typeof user.username === 'string' && typeof user.passwordHash === 'string')
+    && candidate.alerts.every(alert => alert && typeof alert.id === 'string'
+      && typeof alert.userId === 'string' && typeof alert.timestamp === 'string');
+}
+
+function checkDirectory(directory, label) {
+  if (!fs.existsSync(directory)) {
+    warn(`${label} is missing and will be created on startup: ${directory}`);
+    return;
+  }
+  try {
+    fs.accessSync(directory, fs.constants.R_OK | fs.constants.W_OK);
+    ok(`${label} is readable and writable: ${directory}`);
+  } catch (_) {
+    fail(`${label} is not readable and writable: ${directory}`);
+  }
+}
+
 console.log('Vyntrix environment doctor');
 console.log(`Project: ${projectRoot}`);
 
@@ -183,6 +205,31 @@ if (fs.existsSync(dataDirectory)) {
   }
 } else {
   warn(`Runtime data directory will be created on first start: ${dataDirectory}`);
+}
+
+if (fs.existsSync(dataDirectory)) {
+  checkDirectory(path.join(dataDirectory, 'alerts'), 'Alert image directory');
+  checkDirectory(path.join(dataDirectory, 'sessions'), 'Session directory');
+
+  const databasePath = path.join(dataDirectory, 'database.json');
+  const temporaryDatabasePath = `${databasePath}.tmp`;
+  if (fs.existsSync(temporaryDatabasePath)) {
+    warn(`Stale database temporary file found; inspect before starting: ${temporaryDatabasePath}`);
+  }
+  if (!fs.existsSync(databasePath)) {
+    warn(`database.json is missing and will be initialized on startup: ${databasePath}`);
+  } else {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(databasePath, 'utf8'));
+      if (validateDatabaseShape(parsed)) {
+        ok('database.json is valid and has the required users and alerts collections.');
+      } else {
+        fail('database.json has an invalid structure; no data was modified.');
+      }
+    } catch (_) {
+      fail('database.json is malformed; no data was modified.');
+    }
+  }
 }
 
 section('Summary');

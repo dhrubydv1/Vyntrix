@@ -5,6 +5,8 @@ npm-debug.log*
 .vercel
 data/alerts/
 data/database.json
+data/database.json.bak
+data/database.json.tmp
 data/sessions/
 # Camera snapshots are private user data and must never be committed.
 public/uploads/

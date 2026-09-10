@@ -122,49 +122,49 @@ describe('Database Module (db.js)', () => {
   describe('addAlert', () => {
     const TEST_IMAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA//9k=';
 
-    it('should create a new alert and return it', () => {
+    it('should create a new alert and return it', async () => {
       const testDb = require('../backend/db');
 
-      const alert = testDb.addAlert(U1, 'Front Door', TEST_IMAGE);
+      const alert = await testDb.addAlert(U1, 'Front Door', TEST_IMAGE);
       assert.ok(alert.id, 'Alert should have an id');
       assert.strictEqual(alert.cameraName, 'Front Door');
       assert.ok(alert.timestamp, 'Alert should have a timestamp');
       assert.ok(alert.imageFile, 'Alert should have an imageFile');
     });
 
-    it('should default cameraName to Unknown Camera when empty', () => {
+    it('should default cameraName to Unknown Camera when empty', async () => {
       const testDb = require('../backend/db');
 
-      const alert = testDb.addAlert(U1, '', TEST_IMAGE);
+      const alert = await testDb.addAlert(U1, '', TEST_IMAGE);
       assert.strictEqual(alert.cameraName, 'Unknown Camera');
     });
 
-    it('should reject non-string image content', () => {
+    it('should reject non-string image content', async () => {
       const testDb = require('../backend/db');
 
-      assert.throws(
+      await assert.rejects(
         () => testDb.addAlert(U1, 'cam', 12345),
         { message: 'Image content is required' }
       );
     });
 
-    it('should reject invalid image format', () => {
+    it('should reject invalid image format', async () => {
       const testDb = require('../backend/db');
 
-      assert.throws(
+      await assert.rejects(
         () => testDb.addAlert(U1, 'cam', 'not-an-image'),
         { message: 'Only JPEG, PNG, and WebP image uploads are supported' }
       );
     });
 
-    it('should reject oversized images', () => {
+    it('should reject oversized images', async () => {
       const testDb = require('../backend/db');
 
       // Create a base64 string that decodes to > 2MB
       const largeBase64 = 'A'.repeat(3 * 1024 * 1024);
       const largeImage = `data:image/jpeg;base64,${largeBase64}`;
 
-      assert.throws(
+      await assert.rejects(
         () => testDb.addAlert(U1, 'cam', largeImage),
         { message: 'Image must be between 1 byte and 2 MB' }
       );
@@ -172,12 +172,12 @@ describe('Database Module (db.js)', () => {
   });
 
   describe('getAlertsForUser', () => {
-    it('should return alerts for the given user sorted by timestamp desc', () => {
+    it('should return alerts for the given user sorted by timestamp desc', async () => {
       const testDb = require('../backend/db');
 
       const TEST_IMAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA//9k=';
 
-      testDb.addAlert(U1, 'Cam A', TEST_IMAGE);
+      await testDb.addAlert(U1, 'Cam A', TEST_IMAGE);
       const alerts = testDb.getAlertsForUser(U1);
       assert.ok(alerts.length > 0, 'Should have at least one alert');
       assert.strictEqual(alerts[0].userId, U1);
@@ -192,12 +192,12 @@ describe('Database Module (db.js)', () => {
   });
 
   describe('getAlertFilePath', () => {
-    it('should return a file path for an existing alert', () => {
+    it('should return a file path for an existing alert', async () => {
       const testDb = require('../backend/db');
 
       const TEST_IMAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA//9k=';
 
-      const alert = testDb.addAlert(U1, 'Cam', TEST_IMAGE);
+      const alert = await testDb.addAlert(U1, 'Cam', TEST_IMAGE);
       const filePath = testDb.getAlertFilePath(U1, alert.id);
       assert.ok(filePath, 'Should return a file path');
       assert.ok(filePath.endsWith('.jpg'), 'Should end with .jpg extension');
@@ -210,12 +210,12 @@ describe('Database Module (db.js)', () => {
       assert.strictEqual(filePath, null);
     });
 
-    it('should return null for wrong userId', () => {
+    it('should return null for wrong userId', async () => {
       const testDb = require('../backend/db');
 
       const TEST_IMAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA//9k=';
 
-      const alert = testDb.addAlert(U1, 'Cam', TEST_IMAGE);
+      const alert = await testDb.addAlert(U1, 'Cam', TEST_IMAGE);
       const filePath = testDb.getAlertFilePath('wrong_user_id', alert.id);
       assert.strictEqual(filePath, null);
     });
@@ -232,13 +232,13 @@ describe('Database Module (db.js)', () => {
   });
 
   describe('deleteAlert', () => {
-    it('should delete an existing alert and return true', () => {
+    it('should delete an existing alert and return true', async () => {
       const testDb = require('../backend/db');
 
       const TEST_IMAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA//9k=';
 
-      const alert = testDb.addAlert(U1, 'Cam', TEST_IMAGE);
-      const deleted = testDb.deleteAlert(U1, alert.id);
+      const alert = await testDb.addAlert(U1, 'Cam', TEST_IMAGE);
+      const deleted = await testDb.deleteAlert(U1, alert.id);
       assert.strictEqual(deleted, true);
 
       // Verify it's gone
@@ -246,20 +246,20 @@ describe('Database Module (db.js)', () => {
       assert.strictEqual(filePath, null);
     });
 
-    it('should return false for non-existent alert', () => {
+    it('should return false for non-existent alert', async () => {
       const testDb = require('../backend/db');
 
-      const deleted = testDb.deleteAlert(U1, 'nonexistent');
+      const deleted = await testDb.deleteAlert(U1, 'nonexistent');
       assert.strictEqual(deleted, false);
     });
 
-    it('should return false for wrong userId', () => {
+    it('should return false for wrong userId', async () => {
       const testDb = require('../backend/db');
 
       const TEST_IMAGE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA//9k=';
 
-      const alert = testDb.addAlert(U1, 'Cam', TEST_IMAGE);
-      const deleted = testDb.deleteAlert('wrong_user_id', alert.id);
+      const alert = await testDb.addAlert(U1, 'Cam', TEST_IMAGE);
+      const deleted = await testDb.deleteAlert('wrong_user_id', alert.id);
       assert.strictEqual(deleted, false);
     });
   });

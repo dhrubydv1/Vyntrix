@@ -190,14 +190,14 @@ app.get('/api/alerts/:id/image', requireAuth, (req, res) => {
   return res.sendFile(filePath);
 });
 
-app.post('/api/alerts/upload', requireAuth, alertUploadLimiter, (req, res) => {
+app.post('/api/alerts/upload', requireAuth, alertUploadLimiter, async (req, res) => {
   const { cameraName, image } = req.body;
   if (!image) {
     return res.status(400).json({ error: 'Image content is required' });
   }
 
   try {
-    const alert = db.addAlert(req.session.user.id, cameraName, image);
+    const alert = await db.addAlert(req.session.user.id, cameraName, image);
     const responseAlert = toAlertResponse(alert);
     
     // Broadcast motion alert to monitors in real-time
@@ -225,8 +225,8 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-app.delete('/api/alerts/:id', requireAuth, (req, res) => {
-  const success = db.deleteAlert(req.session.user.id, req.params.id);
+app.delete('/api/alerts/:id', requireAuth, async (req, res) => {
+  const success = await db.deleteAlert(req.session.user.id, req.params.id);
   if (success) {
     return res.json({ success: true });
   }

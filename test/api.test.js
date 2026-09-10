@@ -111,11 +111,11 @@ app.get('/api/alerts/:id/image', requireAuth, (req, res) => {
   return res.sendFile(filePath);
 });
 
-app.post('/api/alerts/upload', requireAuth, (req, res) => {
+app.post('/api/alerts/upload', requireAuth, async (req, res) => {
   const { cameraName, image } = req.body;
   if (!image) return res.status(400).json({ error: 'Image content is required' });
   try {
-    const alert = db.addAlert(req.session.user.id, cameraName, image);
+    const alert = await db.addAlert(req.session.user.id, cameraName, image);
     return res.json({ success: true, alert: toAlertResponse(alert) });
   } catch (err) {
     console.error('Failed to upload alert:', err.message);
@@ -123,8 +123,8 @@ app.post('/api/alerts/upload', requireAuth, (req, res) => {
   }
 });
 
-app.delete('/api/alerts/:id', requireAuth, (req, res) => {
-  const success = db.deleteAlert(req.session.user.id, req.params.id);
+app.delete('/api/alerts/:id', requireAuth, async (req, res) => {
+  const success = await db.deleteAlert(req.session.user.id, req.params.id);
   if (success) return res.json({ success: true });
   return res.status(404).json({ error: 'Alert not found or unauthorized' });
 });
