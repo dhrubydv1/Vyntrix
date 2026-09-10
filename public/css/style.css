@@ -805,6 +805,8 @@ main {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* CCTV feeds use the physical camera orientation, never selfie mirroring. */
+  transform: scaleX(1);
   transition: filter 0.3s ease, transform 0.2s ease;
 }
 
