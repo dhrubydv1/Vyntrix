@@ -9,7 +9,11 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 
 const db = require('./db');
-const { DATA_DIR } = require('./config');
+const {
+  DATA_DIR,
+  ALERT_UPLOAD_LIMIT,
+  ALERT_UPLOAD_WINDOW_MS
+} = require('./config');
 
 const app = express();
 const server = http.createServer(app);
@@ -75,6 +79,15 @@ const authLimiter = rateLimit({
   message: { error: 'Too many authentication attempts. Please try again later.' }
 });
 app.use('/api/auth', authLimiter);
+
+const alertUploadLimiter = rateLimit({
+  windowMs: ALERT_UPLOAD_WINDOW_MS,
+  limit: ALERT_UPLOAD_LIMIT,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => `user:${req.session.user.id}`,
+  message: { error: 'Too many alert uploads. Please wait before trying again.' }
+});
 
 // Serve Static Files
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -169,7 +182,7 @@ app.get('/api/alerts/:id/image', requireAuth, (req, res) => {
   return res.sendFile(filePath);
 });
 
-app.post('/api/alerts/upload', requireAuth, (req, res) => {
+app.post('/api/alerts/upload', requireAuth, alertUploadLimiter, (req, res) => {
   const { cameraName, image } = req.body;
   if (!image) {
     return res.status(400).json({ error: 'Image content is required' });
@@ -186,8 +199,22 @@ app.post('/api/alerts/upload', requireAuth, (req, res) => {
     return res.json({ success: true, alert: responseAlert });
   } catch (err) {
     console.error('Failed to upload alert:', err);
+    if (err.code === 'ALERT_IMAGE_TOO_LARGE') {
+      return res.status(413).json({ error: err.message });
+    }
+    if (err.code === 'STORAGE_WRITE_FAILED') {
+      return res.status(500).json({ error: 'Alert could not be saved. Please try again.' });
+    }
     return res.status(400).json({ error: err.message || 'Failed to upload alert' });
   }
+});
+
+// Return a clear JSON response when express.json rejects an oversized body.
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body is too large.' });
+  }
+  return next(err);
 });
 
 app.delete('/api/alerts/:id', requireAuth, (req, res) => {
@@ -296,9 +323,13 @@ io.on('connection', (socket) => {
 });
 
 // Run server
-server.listen(PORT, () => {
-  console.log(`=========================================`);
-  console.log(`   Vyntrix backend is up and running!`);
-  console.log(`   Local Server: http://localhost:${PORT}`);
-  console.log(`=========================================`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`=========================================`);
+    console.log(`   Vyntrix backend is up and running!`);
+    console.log(`   Local Server: http://localhost:${PORT}`);
+    console.log(`=========================================`);
+  });
+}
+
+module.exports = { app, server };

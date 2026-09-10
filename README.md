@@ -112,6 +112,10 @@ PORT=8080 SESSION_SECRET='replace-with-a-long-random-secret' npm start
 | `SESSION_SECRET` | development fallback | Secret used to sign login sessions. It is required when `NODE_ENV=production`. |
 | `NODE_ENV` | unset | Set to `production` behind HTTPS so session cookies are marked secure. |
 | `VYNTRIX_DATA_DIR` | `./data` | Optional directory for runtime JSON data, alert images, and sessions. |
+| `VYNTRIX_ALERT_MAX_IMAGE_BYTES` | `2097152` | Maximum decoded alert image size; maximum supported value is 2 MB. |
+| `VYNTRIX_MAX_ALERTS_PER_USER` | `100` | Maximum retained alerts per user; oldest alerts are removed when the limit is reached. |
+| `VYNTRIX_ALERT_UPLOAD_LIMIT` | `60` | Maximum alert uploads per user during the configured window. |
+| `VYNTRIX_ALERT_UPLOAD_WINDOW_MS` | `900000` | Alert upload rate-limit window in milliseconds (15 minutes). |
 
 Copy `.env.example` to `.env.local` when you need to customize the port or
 session secret or move runtime data to another directory; it is loaded
