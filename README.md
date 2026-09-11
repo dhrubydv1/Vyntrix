@@ -109,6 +109,7 @@ PORT=8080 SESSION_SECRET='replace-with-a-long-random-secret' npm start
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3050` | HTTP port for the application. |
+| `VYNTRIX_FRONTEND_ORIGIN` | unset | Exact frontend origin allowed for cross-origin API and Socket.IO requests. |
 | `SESSION_SECRET` | development fallback | Secret used to sign login sessions. It is required when `NODE_ENV=production`. |
 | `NODE_ENV` | unset | Set to `production` behind HTTPS so session cookies are marked secure. |
 | `VYNTRIX_DATA_DIR` | `./data` | Optional directory for runtime JSON data, alert images, and sessions. |
@@ -127,12 +128,26 @@ automatically at startup. Existing deployments may continue using the
 deprecated `SASTA_CCTV_DATA_DIR`, which is used when `VYNTRIX_DATA_DIR` is not
 set. Never commit `.env.local` or any credentials.
 
+### Split frontend/backend deployment
+
+The static frontend can be hosted on Vercel while the persistent Node.js
+backend runs on a separate host. Set `window.VYNTRIX_BACKEND_URL` in
+`public/js/frontend-config.js` to the backend's HTTPS origin, and set
+`VYNTRIX_FRONTEND_ORIGIN` on the backend to the exact Vercel origin (including
+the deployment's custom domain if applicable). The frontend-visible value is
+an origin, not a secret; never place `SESSION_SECRET` or TURN credentials in
+that file.
+
+For local development, leave `window.VYNTRIX_BACKEND_URL` blank. A frontend
+served from localhost then uses `http://localhost:3050` automatically.
+
 ## Architecture
 
 ### Local mode (`npm start`)
 
 ```
-browser → Express + Socket.IO → data/database.json + data/alerts/
+browser frontend → persistent backend (Express + Socket.IO)
+                         → data/database.json + data/alerts/
 ```
 
 ## Project layout
@@ -221,7 +236,7 @@ npm audit       # check dependency advisories
 - Cameras, monitors, alerts, and snapshot images are scoped to the signed-in account.
 - Alert images are stored outside the public directory and served only through authenticated API endpoints.
 - Sessions use HTTP-only cookies.
-- All frontend API calls include `credentials: 'same-origin'` for reliable session handling.
+- All frontend API calls use the configured backend origin and `credentials: 'include'` for session handling.
 - Never reuse the development `SESSION_SECRET` fallback in production.
 
 ## Deployment status

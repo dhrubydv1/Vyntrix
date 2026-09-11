@@ -2,7 +2,7 @@
 
 async function checkSession() {
   try {
-    const res = await fetch('/api/auth/session', { credentials: 'same-origin' });
+    const res = await fetch(VyntrixConfig.apiUrl('/api/auth/session'), { credentials: 'include' });
     const data = await res.json();
     return data;
   } catch (err) {
@@ -76,7 +76,7 @@ function createNavLink(id, href, label, className = 'nav-link') {
 
 async function handleLogout() {
   try {
-    const res = await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    const res = await fetch(VyntrixConfig.apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' });
     const data = await res.json();
     if (data.success) {
       window.location.href = '/';
@@ -101,7 +101,7 @@ async function redirectIfLoggedIn() {
   const session = await checkSession();
   if (session.loggedIn) {
     try {
-      const res = await fetch('/api/devices/active-cameras', { credentials: 'same-origin' });
+      const res = await fetch(VyntrixConfig.apiUrl('/api/devices/active-cameras'), { credentials: 'include' });
       const data = await res.json();
       if (data.count === 0) {
         window.location.href = '/camera.html?autostart=true';

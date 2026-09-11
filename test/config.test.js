@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const projectRoot = path.join(__dirname, '..');
 const configExpression = "process.stdout.write(require('./backend/config').DATA_DIR)";
 const iceExpression = "process.stdout.write(JSON.stringify(require('./backend/config').ICE_SERVERS))";
+const frontendOriginExpression = "process.stdout.write(String(require('./backend/config').FRONTEND_ORIGIN))";
 
 function resolveDataDir(extraEnvironment = {}) {
   const environment = { ...process.env };
@@ -34,6 +35,17 @@ function resolveIceServers(extraEnvironment = {}) {
     env: environment,
     encoding: 'utf8'
   }));
+}
+
+function resolveFrontendOrigin(extraEnvironment = {}) {
+  const environment = { ...process.env };
+  delete environment.VYNTRIX_FRONTEND_ORIGIN;
+  Object.assign(environment, extraEnvironment);
+  return execFileSync(process.execPath, ['-e', frontendOriginExpression], {
+    cwd: projectRoot,
+    env: environment,
+    encoding: 'utf8'
+  });
 }
 
 describe('Data directory configuration', () => {
@@ -104,5 +116,15 @@ describe('WebRTC ICE configuration', () => {
     assert.match(monitorSource, /getIceServers\(\)/);
     assert.doesNotMatch(cameraSource, /stun:stun\.l\.google\.com/);
     assert.doesNotMatch(monitorSource, /stun:stun\.l\.google\.com/);
+  });
+
+  it('normalizes a configured frontend origin and rejects paths', () => {
+    assert.strictEqual(
+      resolveFrontendOrigin({ VYNTRIX_FRONTEND_ORIGIN: 'https://vyntrix.example/' }),
+      'https://vyntrix.example'
+    );
+    assert.throws(() => resolveFrontendOrigin({
+      VYNTRIX_FRONTEND_ORIGIN: 'https://vyntrix.example/app'
+    }));
   });
 });

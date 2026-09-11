@@ -13,13 +13,15 @@ const {
   DATA_DIR,
   ALERT_UPLOAD_LIMIT,
   ALERT_UPLOAD_WINDOW_MS,
-  ICE_SERVERS
+  ICE_SERVERS,
+  FRONTEND_ORIGIN
 } = require('./config');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  maxHttpBufferSize: 2 * 1024 * 1024
+  maxHttpBufferSize: 2 * 1024 * 1024,
+  cors: FRONTEND_ORIGIN ? { origin: FRONTEND_ORIGIN, credentials: true } : undefined
 });
 
 const PORT = process.env.PORT || 3050;
@@ -44,8 +46,8 @@ const sessionMiddleware = session({
   cookie: {
     maxAge: 24 * 60 * 60 * 1000, // 1 day
     httpOnly: true,
-    sameSite: 'lax',
-    secure: isProduction
+    sameSite: FRONTEND_ORIGIN ? 'none' : 'lax',
+    secure: isProduction || Boolean(FRONTEND_ORIGIN)
   }
 });
 
@@ -61,13 +63,31 @@ app.use((req, res, next) => {
   next();
 });
 
+// Permit only the configured frontend to call the backend cross-origin. When
+// unset, local same-origin development continues without CORS headers.
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (origin && FRONTEND_ORIGIN && origin !== FRONTEND_ORIGIN) {
+    return res.status(403).json({ error: 'Origin is not allowed' });
+  }
+  if (origin && FRONTEND_ORIGIN) {
+    res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Vary', 'Origin');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 // Browsers send an Origin header for cross-site form/fetch requests. Reject a
 // mismatched value before any state-changing API route to provide CSRF defence
 // in addition to the SameSite session cookie.
 app.use('/api', (req, res, next) => {
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return next();
   const origin = req.get('origin');
-  if (!origin || origin === `${req.protocol}://${req.get('host')}`) return next();
+  if (!origin || origin === `${req.protocol}://${req.get('host')}` || origin === FRONTEND_ORIGIN) return next();
   return res.status(403).json({ error: 'Cross-origin requests are not allowed' });
 });
 
@@ -145,7 +165,10 @@ app.post('/api/auth/logout', (req, res) => {
     if (err) {
       return res.status(500).json({ error: 'Could not log out' });
     }
-    res.clearCookie('sasta_cctv_session');
+    res.clearCookie('sasta_cctv_session', {
+      sameSite: FRONTEND_ORIGIN ? 'none' : 'lax',
+      secure: isProduction || Boolean(FRONTEND_ORIGIN)
+    });
     return res.json({ success: true });
   });
 });

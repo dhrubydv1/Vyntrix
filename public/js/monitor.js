@@ -35,6 +35,7 @@ async function init() {
   setupDOMListeners();
   setupTimeCounter();
   iceServers = await getIceServers();
+  await window.VyntrixSocketReady;
   connectSocket();
 }
 
@@ -131,7 +132,7 @@ function setupTimeCounter() {
 
 // Socket IO Setup
 function connectSocket() {
-  socket = io();
+  socket = io(VyntrixConfig.backendOrigin, { withCredentials: true });
 
   socket.on('connect', () => {
     console.log('Connected to signaling server');
@@ -474,7 +475,7 @@ function backToCameraList() {
 // Fetch historical alert logs from database
 async function fetchAlertLogs() {
   try {
-    const res = await fetch('/api/alerts', { credentials: 'same-origin' });
+    const res = await fetch(VyntrixConfig.apiUrl('/api/alerts'), { credentials: 'include' });
     const data = await res.json();
     if (res.ok) {
       alertsCache = data.alerts;
@@ -524,7 +525,7 @@ function renderAlertList() {
     const thumbnail = document.createElement('div');
     thumbnail.className = 'alert-thumbnail';
     const image = document.createElement('img');
-    image.src = alert.imagePath || '';
+    image.src = alert.imagePath ? VyntrixConfig.apiUrl(alert.imagePath) : '';
     image.alt = 'Alert thumbnail';
     thumbnail.appendChild(image);
     const info = document.createElement('div');
@@ -561,7 +562,7 @@ function openAlertModal(alert) {
   activeAlert = alert;
   
   document.getElementById('modal-camera-name').innerText = alert.cameraName;
-  document.getElementById('modal-image').src = alert.imagePath;
+  document.getElementById('modal-image').src = VyntrixConfig.apiUrl(alert.imagePath);
   
   const date = new Date(alert.timestamp);
   document.getElementById('modal-timestamp').innerText = date.toLocaleString();
@@ -584,9 +585,9 @@ async function deleteActiveAlert() {
 // Delete helper call
 async function deleteAlertItem(id) {
   try {
-    const res = await fetch(`/api/alerts/${id}`, {
+    const res = await fetch(VyntrixConfig.apiUrl(`/api/alerts/${id}`), {
       method: 'DELETE',
-      credentials: 'same-origin'
+      credentials: 'include'
     });
     
     if (res.ok) {

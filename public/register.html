@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
   <link rel="icon" type="image/png" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📹</text></svg>">
   <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/frontend-config.js"></script>
   <script src="/js/auth.js"></script>
 </head>
 
@@ -89,9 +90,10 @@
       }
 
       try {
-        const res = await fetch('/api/auth/register', {
+        const res = await fetch(VyntrixConfig.apiUrl('/api/auth/register'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ username, password })
         });
         const data = await res.json();
@@ -101,7 +103,7 @@
           succEl.style.display = 'block';
           
           try {
-            const countRes = await fetch('/api/devices/active-cameras', { credentials: 'same-origin' });
+            const countRes = await fetch(VyntrixConfig.apiUrl('/api/devices/active-cameras'), { credentials: 'include' });
             const countData = await countRes.json();
             const target = countData.count === 0 ? '/camera.html?autostart=true' : '/monitor.html';
             setTimeout(() => {

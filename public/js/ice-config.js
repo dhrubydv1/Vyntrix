@@ -6,7 +6,7 @@ let iceServersPromise = null;
 
 async function getIceServers() {
   if (!iceServersPromise) {
-    iceServersPromise = fetch('/api/webrtc/ice-servers', { credentials: 'same-origin' })
+    iceServersPromise = fetch(VyntrixConfig.apiUrl('/api/webrtc/ice-servers'), { credentials: 'include' })
       .then(async (response) => {
         if (!response.ok) throw new Error(`ICE configuration request failed (${response.status})`);
         const payload = await response.json();

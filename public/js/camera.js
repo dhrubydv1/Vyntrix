@@ -40,6 +40,7 @@ async function init() {
   
   setupDOMListeners();
   setupTimeCounter();
+  await window.VyntrixSocketReady;
 
   // Auto-start camera if redirect query param is present
   const params = new URLSearchParams(window.location.search);
@@ -270,7 +271,7 @@ function updateCameraStatus(status) {
 
 // Socket IO setup
 function connectSocket() {
-  socket = io();
+  socket = io(VyntrixConfig.backendOrigin, { withCredentials: true });
   const signalingSocket = socket;
   
   signalingSocket.on('connect', () => {
@@ -595,10 +596,10 @@ async function triggerMotionAlert() {
     if (!isStreaming || !motionDetectionEnabled) return;
 
     // Send to backend
-    const res = await fetch('/api/alerts/upload', {
+    const res = await fetch(VyntrixConfig.apiUrl('/api/alerts/upload'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
+      credentials: 'include',
       signal: controller.signal,
       body: JSON.stringify({
         cameraName,
