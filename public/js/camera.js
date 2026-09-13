@@ -330,6 +330,14 @@ function connectSocket() {
 
 function createPeerConnection(monitorSocketId, signalingSocket = socket) {
   console.log('Creating RTCPeerConnection for monitor:', monitorSocketId);
+
+  console.log('LOCAL TRACKS',
+    localStream?.getTracks().map(track => ({
+      kind: track.kind,
+      enabled: track.enabled,
+      readyState: track.readyState
+    }))
+  );
   
   const pc = new RTCPeerConnection({
     iceServers
@@ -339,6 +347,14 @@ function createPeerConnection(monitorSocketId, signalingSocket = socket) {
   localStream.getTracks().forEach(track => {
     pc.addTrack(track, localStream);
   });
+
+  console.log('SENDERS',
+    pc.getSenders().map(sender => ({
+      kind: sender.track?.kind,
+      enabled: sender.track?.enabled,
+      readyState: sender.track?.readyState
+    }))
+  );
 
   // ICE candidates
   pc.onicecandidate = (event) => {

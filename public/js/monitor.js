@@ -380,6 +380,10 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
     iceServers
   });
 
+  // The monitor is the offerer, so explicitly negotiate a receive-only
+  // video m-line for the camera's remote video track.
+  peerConnection.addTransceiver('video', { direction: 'recvonly' });
+
   // Attach Microphone track if available
   if (micTrack && micStream) {
     peerConnection.addTrack(micTrack, micStream);
