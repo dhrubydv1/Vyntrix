@@ -14,10 +14,13 @@ const peerConnections = {};
 let prevFrameData = null;
 let motionIntervalId = null;
 let motionDetectionEnabled = false;
-let alertCooldown = false;
-let alertCooldownTimeoutId = null;
+let motionEventActive = false;
+let motionEventStartedAt = 0;
+let lastMotionDetectedAt = 0;
+let motionResetTimeoutId = null;
 let motionAlertController = null;
-const MOTION_COOLDOWN_MS = 10000; // 10 seconds cooldown between uploads
+const MOTION_EVENT_COOLDOWN_MS = 30000;
+const MOTION_RESET_MS = 3000;
 
 // Audio Synth Alarm (Siren)
 let audioCtx = null;
@@ -463,11 +466,11 @@ function startMotionDetection() {
         // Draw bounding box overlay in neon green
         drawMotionOverlay(outCtx, diff.boxes, video.videoWidth, video.videoHeight, processingCanvas.width, processingCanvas.height);
         
-        // Trigger alert post to backend
-        triggerMotionAlert();
+        recordMotionDetected();
       } else {
         outCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
         hideMotionWarning();
+        recordMotionStopped();
       }
     }
 
@@ -481,12 +484,7 @@ function stopMotionDetection() {
     motionIntervalId = null;
   }
   prevFrameData = null;
-  alertCooldown = false;
-
-  if (alertCooldownTimeoutId) {
-    clearTimeout(alertCooldownTimeoutId);
-    alertCooldownTimeoutId = null;
-  }
+  resetMotionEventState();
 
   if (motionAlertController) {
     motionAlertController.abort();
@@ -500,6 +498,49 @@ function stopMotionDetection() {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
+}
+
+function recordMotionDetected() {
+  const now = Date.now();
+
+  lastMotionDetectedAt = now;
+  if (motionResetTimeoutId) {
+    clearTimeout(motionResetTimeoutId);
+    motionResetTimeoutId = null;
+  }
+
+  const cooldownExpired = motionEventActive
+    && now - motionEventStartedAt >= MOTION_EVENT_COOLDOWN_MS;
+  if (motionEventActive && !cooldownExpired) return;
+
+  // The logical event starts independently of snapshot/upload success so a
+  // failed image capture cannot cause the detector to spam retries.
+  motionEventActive = true;
+  motionEventStartedAt = now;
+  triggerMotionAlert();
+}
+
+function recordMotionStopped() {
+  if (!motionEventActive || motionResetTimeoutId) return;
+
+  motionResetTimeoutId = setTimeout(() => {
+    motionResetTimeoutId = null;
+    if (Date.now() - lastMotionDetectedAt >= MOTION_RESET_MS) {
+      motionEventActive = false;
+      motionEventStartedAt = 0;
+      lastMotionDetectedAt = 0;
+    }
+  }, MOTION_RESET_MS);
+}
+
+function resetMotionEventState() {
+  if (motionResetTimeoutId) {
+    clearTimeout(motionResetTimeoutId);
+    motionResetTimeoutId = null;
+  }
+  motionEventActive = false;
+  motionEventStartedAt = 0;
+  lastMotionDetectedAt = 0;
 }
 
 function compareFrames(frameA, frameB, sensitivity) {
@@ -582,12 +623,11 @@ function hideMotionWarning() {
 
 // Upload motion alerts to the backend
 async function triggerMotionAlert() {
-  if (!isStreaming || !motionDetectionEnabled || alertCooldown) return;
-  
-  alertCooldown = true;
+  if (!isStreaming || !motionDetectionEnabled || motionAlertController) return;
+
   const controller = new AbortController();
   motionAlertController = controller;
-  console.log('Motion alert triggered! Capturing snapshot...');
+  console.log('Motion event triggered! Saving metadata...');
   
   // Auto Siren Trigger
   if (document.getElementById('toggle-auto-siren').checked) {
@@ -597,20 +637,6 @@ async function triggerMotionAlert() {
   try {
     if (!isStreaming || !motionDetectionEnabled) return;
 
-    const video = document.getElementById('webcam-preview');
-    
-    // Draw high-resolution snapshot
-    const captureCanvas = document.createElement('canvas');
-    captureCanvas.width = 640;
-    captureCanvas.height = 360;
-    const ctx = captureCanvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
-    
-    // Export image as jpeg
-    const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.65);
-
-    if (!isStreaming || !motionDetectionEnabled) return;
-
     // Send to backend
     const res = await fetch(VyntrixConfig.apiUrl('/api/alerts/upload'), {
       method: 'POST',
@@ -618,31 +644,21 @@ async function triggerMotionAlert() {
       credentials: 'include',
       signal: controller.signal,
       body: JSON.stringify({
-        cameraName,
-        image: dataUrl
+        cameraName
       })
     });
     
     const result = await res.json();
     if (res.ok && result.success) {
-      console.log('Motion snapshot successfully uploaded:', result.alert.imagePath);
+      console.log('Motion event successfully saved:', result.alert.id);
     }
   } catch (err) {
     if (err.name !== 'AbortError') {
-      console.error('Failed to upload motion alert snapshot:', err);
+      console.error('Failed to save motion event:', err);
     }
   } finally {
     if (motionAlertController === controller) {
       motionAlertController = null;
-    }
-
-    if (isStreaming && motionDetectionEnabled) {
-      alertCooldownTimeoutId = setTimeout(() => {
-        alertCooldown = false;
-        alertCooldownTimeoutId = null;
-      }, MOTION_COOLDOWN_MS);
-    } else {
-      alertCooldown = false;
     }
   }
 }

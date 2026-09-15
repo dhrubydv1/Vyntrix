@@ -528,10 +528,19 @@ function renderAlertList() {
 
     const thumbnail = document.createElement('div');
     thumbnail.className = 'alert-thumbnail';
-    const image = document.createElement('img');
-    image.src = alert.imagePath ? VyntrixConfig.apiUrl(alert.imagePath) : '';
-    image.alt = 'Alert thumbnail';
-    thumbnail.appendChild(image);
+    if (alert.imagePath) {
+      const image = document.createElement('img');
+      image.src = VyntrixConfig.apiUrl(alert.imagePath);
+      image.alt = 'Alert thumbnail';
+      thumbnail.appendChild(image);
+    } else {
+      const placeholder = document.createElement('span');
+      placeholder.className = 'alert-thumbnail-placeholder';
+      placeholder.textContent = 'MOTION';
+      placeholder.setAttribute('aria-label', 'Motion event without snapshot');
+      thumbnail.appendChild(placeholder);
+      item.classList.add('metadata-only');
+    }
     const info = document.createElement('div');
     info.className = 'alert-info';
     const camera = document.createElement('span');
@@ -555,7 +564,7 @@ function renderAlertList() {
         deleteAlertItem(alert.id);
         return;
       }
-      openAlertModal(alert);
+      if (alert.imagePath) openAlertModal(alert);
     });
 
     list.appendChild(item);

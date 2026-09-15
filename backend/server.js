@@ -214,10 +214,7 @@ app.get('/api/alerts/:id/image', requireAuth, async (req, res) => {
 });
 
 app.post('/api/alerts/upload', requireAuth, alertUploadLimiter, async (req, res) => {
-  const { cameraName, image } = req.body;
-  if (!image) {
-    return res.status(400).json({ error: 'Image content is required' });
-  }
+  const { cameraName, image } = req.body || {};
 
   try {
     const alert = await db.addAlert(req.session.user.id, cameraName, image);
@@ -229,7 +226,7 @@ app.post('/api/alerts/upload', requireAuth, alertUploadLimiter, async (req, res)
 
     return res.json({ success: true, alert: responseAlert });
   } catch (err) {
-    console.error('Failed to upload alert:', err);
+    console.error('Failed to create alert:', err);
     if (err.code === 'ALERT_IMAGE_TOO_LARGE') {
       return res.status(413).json({ error: err.message });
     }
@@ -263,7 +260,9 @@ const toAlertResponse = (alert) => ({
   id: alert.id,
   cameraName: alert.cameraName,
   timestamp: alert.timestamp,
-  imagePath: `/api/alerts/${encodeURIComponent(alert.id)}/image`
+  ...((alert.imageFile || alert.imagePath) && {
+    imagePath: `/api/alerts/${encodeURIComponent(alert.id)}/image`
+  })
 });
 
 const getCamerasForUser = (userId) => {

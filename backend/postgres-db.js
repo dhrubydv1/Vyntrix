@@ -8,7 +8,7 @@ const {
 } = require('./config');
 const { pool } = require('./postgres');
 
-// Alert images remain local files and are served only after ownership checks.
+// Optional legacy alert images remain local and are served only after ownership checks.
 const UPLOADS_DIR = path.join(DATA_DIR, 'alerts');
 const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/;
@@ -31,7 +31,6 @@ function ensureWritableDirectory(directory, label) {
 
 function init() {
   ensureWritableDirectory(DATA_DIR, 'Runtime data directory');
-  ensureWritableDirectory(UPLOADS_DIR, 'Alert image directory');
   ensureWritableDirectory(SESSIONS_DIR, 'Session directory');
 }
 
@@ -107,6 +106,7 @@ async function verifyUser(username, password) {
 }
 
 function parseImage(base64Image) {
+  if (base64Image === undefined || base64Image === null) return null;
   if (typeof base64Image !== 'string') throw new Error('Image content is required');
   const matches = base64Image.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
   if (!matches) throw new Error('Only JPEG, PNG, and WebP image uploads are supported');
@@ -129,10 +129,10 @@ function safeImageFile(alert) {
 }
 
 async function addAlert(userId, cameraName, base64Image) {
-  const { imageBuffer, extension } = parseImage(base64Image);
+  const parsedImage = parseImage(base64Image);
   const alertId = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
-  const imageFile = `alert_${userId}_${alertId}.${extension}`;
-  const imagePath = path.join(UPLOADS_DIR, imageFile);
+  const imageFile = parsedImage ? `alert_${userId}_${alertId}.${parsedImage.extension}` : null;
+  const imagePath = imageFile ? path.join(UPLOADS_DIR, imageFile) : null;
   const alert = {
     id: alertId,
     userId,
@@ -140,14 +140,17 @@ async function addAlert(userId, cameraName, base64Image) {
       ? cameraName.trim().slice(0, 64)
       : 'Unknown Camera',
     timestamp: new Date().toISOString(),
-    imageFile
+    ...(imageFile ? { imageFile } : {})
   };
 
   let imageWritten = false;
   const client = await pool.connect();
   try {
-    fs.writeFileSync(imagePath, imageBuffer, { flag: 'wx', mode: 0o600 });
-    imageWritten = true;
+    if (parsedImage) {
+      ensureWritableDirectory(UPLOADS_DIR, 'Alert image directory');
+      fs.writeFileSync(imagePath, parsedImage.imageBuffer, { flag: 'wx', mode: 0o600 });
+      imageWritten = true;
+    }
     await client.query('BEGIN');
 
     // Serialize retention decisions for this user, including when they have

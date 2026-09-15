@@ -12,7 +12,7 @@ const {
 const DB_FILE = path.join(DB_DIR, 'database.json');
 const DB_BACKUP_FILE = `${DB_FILE}.bak`;
 const DB_TEMP_FILE = `${DB_FILE}.tmp`;
-// Alert images are deliberately kept outside the public directory.  They are
+// Optional legacy alert images remain outside the public directory and are
 // served only after the requesting user has been authorised by the API.
 const UPLOADS_DIR = path.join(DB_DIR, 'alerts');
 const SESSIONS_DIR = path.join(DB_DIR, 'sessions');
@@ -88,7 +88,6 @@ function enqueueWrite(operation) {
 // Initialize DB and folders
 function init() {
   ensureWritableDirectory(DB_DIR, 'Runtime data directory');
-  ensureWritableDirectory(UPLOADS_DIR, 'Alert image directory');
   ensureWritableDirectory(SESSIONS_DIR, 'Session directory');
 
   if (fs.existsSync(DB_TEMP_FILE)) {
@@ -167,17 +166,20 @@ async function verifyUser(username, password) {
 
 // Alert / Motion Detection Event Management
 async function addAlert(userId, cameraName, base64Image) {
-  if (typeof base64Image !== 'string') {
+  const hasImage = base64Image !== undefined && base64Image !== null;
+  if (hasImage && typeof base64Image !== 'string') {
     throw new Error('Image content is required');
   }
-  const matches = base64Image.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
-  if (!matches) throw new Error('Only JPEG, PNG, and WebP image uploads are supported');
+  const matches = hasImage
+    ? base64Image.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})$/)
+    : null;
+  if (hasImage && !matches) throw new Error('Only JPEG, PNG, and WebP image uploads are supported');
 
-  const imageBuffer = Buffer.from(matches[2], 'base64');
-  if (!imageBuffer.length) {
+  const imageBuffer = matches ? Buffer.from(matches[2], 'base64') : null;
+  if (imageBuffer && !imageBuffer.length) {
     throw new Error('Image must be between 1 byte and 2 MB');
   }
-  if (imageBuffer.length > MAX_ALERT_IMAGE_BYTES) {
+  if (imageBuffer && imageBuffer.length > MAX_ALERT_IMAGE_BYTES) {
     const maxImageLabel = MAX_ALERT_IMAGE_BYTES === 2 * 1024 * 1024
       ? '2 MB'
       : `${MAX_ALERT_IMAGE_BYTES} bytes`;
@@ -187,9 +189,9 @@ async function addAlert(userId, cameraName, base64Image) {
   }
 
   const alertId = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
-  const extension = matches[1] === 'jpeg' ? 'jpg' : matches[1];
-  const imageFile = `alert_${userId}_${alertId}.${extension}`;
-  const imagePath = path.join(UPLOADS_DIR, imageFile);
+  const extension = matches ? (matches[1] === 'jpeg' ? 'jpg' : matches[1]) : null;
+  const imageFile = extension ? `alert_${userId}_${alertId}.${extension}` : null;
+  const imagePath = imageFile ? path.join(UPLOADS_DIR, imageFile) : null;
   let imageWritten = false;
 
   const newAlert = {
@@ -199,7 +201,7 @@ async function addAlert(userId, cameraName, base64Image) {
       ? cameraName.trim().slice(0, 64)
       : 'Unknown Camera',
     timestamp: new Date().toISOString(),
-    imageFile
+    ...(imageFile ? { imageFile } : {})
   };
 
   return enqueueWrite(() => {
@@ -210,8 +212,11 @@ async function addAlert(userId, cameraName, base64Image) {
     const originalAlerts = db.alerts;
 
     try {
-      fs.writeFileSync(imagePath, imageBuffer, { flag: 'wx', mode: 0o600 });
-      imageWritten = true;
+      if (imageBuffer) {
+        ensureWritableDirectory(UPLOADS_DIR, 'Alert image directory');
+        fs.writeFileSync(imagePath, imageBuffer, { flag: 'wx', mode: 0o600 });
+        imageWritten = true;
+      }
       const removedAlertIds = new Set(alertsToRemove.map(alert => alert.id));
       db.alerts = db.alerts.filter(alert => !removedAlertIds.has(alert.id)).concat(newAlert);
       writeDatabaseAtomically();
@@ -221,7 +226,7 @@ async function addAlert(userId, cameraName, base64Image) {
         try { fs.unlinkSync(imagePath); } catch (_) { /* Preserve the primary error. */ }
       }
       if (err.code === 'STORAGE_WRITE_FAILED') throw err;
-      throw storageError('Failed to persist alert image', err);
+      throw storageError('Failed to persist alert', err);
     }
 
     // Metadata is committed before retention files are removed. A failed

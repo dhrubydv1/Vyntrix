@@ -98,7 +98,9 @@ const toAlertResponse = (alert) => ({
   id: alert.id,
   cameraName: alert.cameraName,
   timestamp: alert.timestamp,
-  imagePath: `/api/alerts/${encodeURIComponent(alert.id)}/image`
+  ...((alert.imageFile || alert.imagePath) && {
+    imagePath: `/api/alerts/${encodeURIComponent(alert.id)}/image`
+  })
 });
 
 app.get('/api/alerts', requireAuth, (req, res) => {
@@ -113,8 +115,7 @@ app.get('/api/alerts/:id/image', requireAuth, (req, res) => {
 });
 
 app.post('/api/alerts/upload', requireAuth, async (req, res) => {
-  const { cameraName, image } = req.body;
-  if (!image) return res.status(400).json({ error: 'Image content is required' });
+  const { cameraName, image } = req.body || {};
   try {
     const alert = await db.addAlert(req.session.user.id, cameraName, image);
     return res.json({ success: true, alert: toAlertResponse(alert) });
@@ -358,11 +359,15 @@ describe('Alert API Routes (authenticated)', () => {
       assert.strictEqual(res.status, 400);
     });
 
-    it('should reject missing image', async () => {
+    it('should create a metadata-only alert when image is missing', async () => {
       const res = await request('POST', '/api/alerts/upload', {
         cameraName: 'Test',
       }, authCookie);
-      assert.strictEqual(res.status, 400);
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.body.success, true);
+      assert.ok(res.body.alert.id);
+      assert.strictEqual(res.body.alert.cameraName, 'Test');
+      assert.strictEqual(res.body.alert.imagePath, undefined);
     });
   });
 
@@ -372,7 +377,8 @@ describe('Alert API Routes (authenticated)', () => {
       assert.strictEqual(res.status, 200);
       assert.ok(Array.isArray(res.body.alerts));
       assert.ok(res.body.alerts.length > 0);
-      assert.ok(res.body.alerts[0].imagePath);
+      assert.ok(res.body.alerts.some(alert => alert.imagePath));
+      assert.ok(res.body.alerts.some(alert => !alert.imagePath));
     });
   });
 

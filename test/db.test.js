@@ -133,6 +133,17 @@ describe('Database Module (db.js)', () => {
       assert.ok(alert.imageFile, 'Alert should have an imageFile');
     });
 
+    it('should create a metadata-only alert without writing an image', async () => {
+      const testDb = require('../backend/db');
+
+      const alert = await testDb.addAlert(U1, 'Metadata Camera');
+      assert.ok(alert.id, 'Alert should have an id');
+      assert.strictEqual(alert.cameraName, 'Metadata Camera');
+      assert.ok(alert.timestamp, 'Alert should have a timestamp');
+      assert.strictEqual(alert.imageFile, undefined);
+      assert.strictEqual(testDb.getAlertFilePath(U1, alert.id), null);
+    });
+
     it('should default cameraName to Unknown Camera when empty', async () => {
       const testDb = require('../backend/db');
 
@@ -233,6 +244,14 @@ describe('Database Module (db.js)', () => {
   });
 
   describe('deleteAlert', () => {
+    it('should delete a metadata-only alert', async () => {
+      const testDb = require('../backend/db');
+      const alert = await testDb.addAlert(U1, 'Metadata Camera');
+
+      assert.strictEqual(await testDb.deleteAlert(U1, alert.id), true);
+      assert.ok(!testDb.getAlertsForUser(U1).some(item => item.id === alert.id));
+    });
+
     it('should delete an existing alert and return true', async () => {
       const testDb = require('../backend/db');
 

@@ -294,6 +294,26 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
 });
 
 describe('Actual Vyntrix server alert ownership integration', () => {
+  it('creates, retrieves, and deletes a metadata-only alert', async () => {
+    const user = await register(`metadata_alert_${Date.now()}`);
+    const created = await request('POST', '/api/alerts/upload', {
+      cameraName: 'Metadata Camera'
+    }, user.cookie);
+    assert.strictEqual(created.status, 200);
+    assert.strictEqual(created.body.alert.cameraName, 'Metadata Camera');
+    assert.strictEqual(created.body.alert.imagePath, undefined);
+
+    const alerts = await request('GET', '/api/alerts', null, user.cookie);
+    assert.strictEqual(alerts.status, 200);
+    assert.ok(alerts.body.alerts.some(alert => alert.id === created.body.alert.id));
+
+    const image = await request('GET', `/api/alerts/${created.body.alert.id}/image`, null, user.cookie);
+    assert.strictEqual(image.status, 404);
+
+    const deletion = await request('DELETE', `/api/alerts/${created.body.alert.id}`, null, user.cookie);
+    assert.strictEqual(deletion.status, 200);
+  });
+
   it('prevents one user from reading or deleting another user\'s alerts', async () => {
     const userA = await register(`alerts_a_${Date.now()}`);
     const userB = await register(`alerts_b_${Date.now()}`);

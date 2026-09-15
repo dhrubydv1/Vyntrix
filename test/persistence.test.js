@@ -132,13 +132,13 @@ describe('Single-node persistence hardening', () => {
     }
   });
 
-  it('creates missing runtime, alert, and session directories at startup', () => {
+  it('starts without requiring an alert image directory', () => {
     const dataDir = makeRuntimeDir();
     removeRuntimeDir(dataDir);
     try {
       runNode("require('./backend/db')", dataDir);
       assert.ok(fs.existsSync(path.join(dataDir, 'database.json')));
-      assert.ok(fs.existsSync(path.join(dataDir, 'alerts')));
+      assert.ok(!fs.existsSync(path.join(dataDir, 'alerts')));
       assert.ok(fs.existsSync(path.join(dataDir, 'sessions')));
     } finally {
       removeRuntimeDir(dataDir);
