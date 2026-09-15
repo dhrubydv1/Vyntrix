@@ -1,3 +1,6 @@
+if (process.env.VYNTRIX_DATABASE_MODE !== 'json') {
+  module.exports = require('./postgres-db');
+} else {
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
@@ -285,3 +288,4 @@ module.exports = {
   getAlertFilePath,
   deleteAlert
 };
+}

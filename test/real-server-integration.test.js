@@ -7,6 +7,7 @@ const { io } = require('socket.io-client');
 
 const TEST_DB_DIR = path.join(__dirname, '..', 'data', 'real-server-test');
 process.env.VYNTRIX_DATA_DIR = TEST_DB_DIR;
+process.env.VYNTRIX_DATABASE_MODE = 'json';
 process.env.VYNTRIX_ALERT_UPLOAD_LIMIT = '100';
 process.env.VYNTRIX_MAX_ALERTS_PER_USER = '100';
 

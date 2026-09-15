@@ -202,13 +202,13 @@ app.get('/api/devices/active-cameras', requireAuth, (req, res) => {
 });
 
 // Alert APIs
-app.get('/api/alerts', requireAuth, (req, res) => {
-  const alerts = db.getAlertsForUser(req.session.user.id).map(toAlertResponse);
+app.get('/api/alerts', requireAuth, async (req, res) => {
+  const alerts = (await db.getAlertsForUser(req.session.user.id)).map(toAlertResponse);
   res.json({ alerts });
 });
 
-app.get('/api/alerts/:id/image', requireAuth, (req, res) => {
-  const filePath = db.getAlertFilePath(req.session.user.id, req.params.id);
+app.get('/api/alerts/:id/image', requireAuth, async (req, res) => {
+  const filePath = await db.getAlertFilePath(req.session.user.id, req.params.id);
   if (!filePath) return res.status(404).json({ error: 'Alert image not found' });
   return res.sendFile(filePath);
 });

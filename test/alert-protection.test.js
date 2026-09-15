@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const TEST_DB_DIR = path.join(__dirname, '..', 'data', 'alert-protection-test');
 process.env.VYNTRIX_DATA_DIR = TEST_DB_DIR;
+process.env.VYNTRIX_DATABASE_MODE = 'json';
 process.env.VYNTRIX_MAX_ALERTS_PER_USER = '2';
 process.env.VYNTRIX_ALERT_UPLOAD_LIMIT = '3';
 process.env.VYNTRIX_ALERT_UPLOAD_WINDOW_MS = '60000';

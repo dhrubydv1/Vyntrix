@@ -11,6 +11,7 @@ const TEST_UPLOADS_DIR = path.join(TEST_DB_DIR, 'alerts');
 // The database module reads this before it is loaded, so test data is never
 // written to the application's real data directory.
 process.env.VYNTRIX_DATA_DIR = TEST_DB_DIR;
+process.env.VYNTRIX_DATABASE_MODE = 'json';
 
 before(() => {
   // Ensure test directories exist

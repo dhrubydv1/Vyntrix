@@ -1,7 +1,13 @@
 // Safe frontend-visible configuration. Set this value to the persistent
 // backend origin for a separately hosted frontend; leave blank for local use.
-window.VYNTRIX_BACKEND_URL = 'https://vyntrix-2w97.onrender.com';
-
+if (
+  window.location.hostname === 'localhost' ||
+  window.location.hostname === '127.0.0.1'
+) {
+  window.VYNTRIX_BACKEND_URL = 'http://localhost:3050';
+} else {
+  window.VYNTRIX_BACKEND_URL = 'https://vyntrix-2w97.onrender.com';
+}
 (function initializeVyntrixConfig() {
   const configured = String(window.VYNTRIX_BACKEND_URL || '').trim().replace(/\/$/, '');
   const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
