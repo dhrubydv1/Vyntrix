@@ -802,10 +802,23 @@ main {
 }
 
 .video-element {
+  --video-mirror-x: 1;
+  --video-zoom: 1;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transform: scaleX(var(--video-mirror-x)) scale(var(--video-zoom));
   transition: filter 0.3s ease, transform 0.2s ease;
+}
+
+.video-element.video-mirrored {
+  --video-mirror-x: -1;
+}
+
+/* Keep the diagnostic motion box over the same displayed pixels without
+   changing the detector's raw coordinates or source frames. */
+#webcam-preview.video-mirrored + .motion-canvas {
+  transform: scaleX(-1);
 }
 
 /* Camera Filters */
@@ -995,6 +1008,60 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.segment-button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.segment-button:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.segment-button[aria-pressed="true"] {
+  color: #04110d;
+  background: var(--accent-neon);
+}
+
+.segment-button:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.segment-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.control-feedback {
+  min-height: 1.1em;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.control-feedback.is-error {
+  color: #ffaaa6;
 }
 
 /* Custom Sliders */

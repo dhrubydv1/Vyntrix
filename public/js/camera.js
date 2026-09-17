@@ -6,6 +6,12 @@ let userId = null;
 let cameraName = 'Camera';
 let isStreaming = false;
 let iceServers = null;
+let activeFacingMode = 'environment';
+let cameraSwitchInProgress = false;
+
+const CAMERA_FACING_STORAGE_KEY = 'vyntrix.camera.facingMode';
+const CAMERA_MIRROR_STORAGE_KEY = 'vyntrix.camera.mirrorPreview';
+const VALID_FACING_MODES = new Set(['user', 'environment']);
 
 // WebRTC connections map: monitorSocketId -> RTCPeerConnection
 const peerConnections = {};
@@ -63,6 +69,33 @@ function setupDOMListeners() {
   const sensitivitySlider = document.getElementById('motion-sensitivity');
   const sensitivityValText = document.getElementById('sensitivity-val');
   const motionToggle = document.getElementById('toggle-motion');
+  const mirrorToggle = document.getElementById('toggle-mirror-preview');
+
+  activeFacingMode = readFacingPreference();
+  updateFacingControls(activeFacingMode);
+  mirrorToggle.checked = readBooleanPreference(CAMERA_MIRROR_STORAGE_KEY);
+  applyLocalMirror(mirrorToggle.checked);
+
+  document.querySelectorAll('[data-facing-mode]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const facingMode = button.dataset.facingMode;
+      if (!VALID_FACING_MODES.has(facingMode)) return;
+      if (!isStreaming) {
+        activeFacingMode = facingMode;
+        writePreference(CAMERA_FACING_STORAGE_KEY, facingMode);
+        updateFacingControls(facingMode);
+        showCameraSwitchStatus(`${facingLabel(facingMode)} camera selected for startup.`);
+        return;
+      }
+      await switchCamera(facingMode);
+    });
+  });
+
+  mirrorToggle.addEventListener('change', (event) => {
+    const mirrored = event.target.checked;
+    writePreference(CAMERA_MIRROR_STORAGE_KEY, String(mirrored));
+    applyLocalMirror(mirrored);
+  });
 
   motionDetectionEnabled = motionToggle.checked;
   motionToggle.addEventListener('change', (e) => {
@@ -80,6 +113,53 @@ function setupDOMListeners() {
     else if (val <= 45) sensitivityValText.innerText = 'Medium';
     else sensitivityValText.innerText = 'Low (Heavy Movement)';
   });
+}
+
+function readFacingPreference() {
+  try {
+    const saved = localStorage.getItem(CAMERA_FACING_STORAGE_KEY);
+    return VALID_FACING_MODES.has(saved) ? saved : 'environment';
+  } catch (_) {
+    return 'environment';
+  }
+}
+
+function readBooleanPreference(key) {
+  try {
+    return localStorage.getItem(key) === 'true';
+  } catch (_) {
+    return false;
+  }
+}
+
+function writePreference(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (_) {
+    // Camera operation should not depend on storage availability.
+  }
+}
+
+function facingLabel(facingMode) {
+  return facingMode === 'user' ? 'Front' : 'Back';
+}
+
+function updateFacingControls(facingMode, disabled = false) {
+  document.querySelectorAll('[data-facing-mode]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.facingMode === facingMode));
+    button.disabled = disabled;
+  });
+}
+
+function showCameraSwitchStatus(message = '', isError = false) {
+  const status = document.getElementById('camera-switch-status');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('is-error', isError);
+}
+
+function applyLocalMirror(mirrored) {
+  document.getElementById('webcam-preview')?.classList.toggle('video-mirrored', mirrored);
 }
 
 function setupTimeCounter() {
@@ -177,16 +257,30 @@ function stopSiren() {
 // Media stream functions
 async function startCamera() {
   cameraName = document.getElementById('camera-name').value.trim() || 'Camera';
+  const preferredFacingMode = readFacingPreference();
   
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: { ideal: 'environment' } },
-      audio: true
-    });
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: cameraVideoConstraints(preferredFacingMode, true),
+        audio: true
+      });
+      activeFacingMode = preferredFacingMode;
+    } catch (preferredError) {
+      if (!['OverconstrainedError', 'NotFoundError', 'DevicesNotFoundError'].includes(preferredError.name)) {
+        throw preferredError;
+      }
+      console.warn(`Preferred ${preferredFacingMode} camera unavailable; using the available camera.`, preferredError);
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: cameraVideoConstraints(),
+        audio: true
+      });
+      activeFacingMode = getTrackFacingMode(localStream.getVideoTracks()[0]);
+      showCameraSwitchStatus(`${facingLabel(preferredFacingMode)} camera was unavailable. Using the available camera.`, true);
+    }
 
-    localStream.getTracks().forEach((track) => {
-      track.addEventListener('ended', handleLocalStreamEnded);
-    });
+    attachTrackEndListeners(localStream);
+    updateFacingControls(activeFacingMode);
     
     const previewEl = document.getElementById('webcam-preview');
     previewEl.srcObject = localStream;
@@ -214,10 +308,115 @@ async function startCamera() {
   }
 }
 
+function cameraVideoConstraints(facingMode, requireFacingMode = false) {
+  return {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    ...(VALID_FACING_MODES.has(facingMode) && {
+      facingMode: requireFacingMode ? { exact: facingMode } : { ideal: facingMode }
+    })
+  };
+}
+
+function getTrackFacingMode(track) {
+  const facingMode = track?.getSettings?.().facingMode;
+  return VALID_FACING_MODES.has(facingMode) ? facingMode : null;
+}
+
+function attachTrackEndListeners(stream) {
+  stream.getTracks().forEach((track) => track.addEventListener('ended', handleLocalStreamEnded));
+}
+
+function detachTrackEndListener(track) {
+  track?.removeEventListener('ended', handleLocalStreamEnded);
+}
+
+async function switchCamera(facingMode) {
+  if (!VALID_FACING_MODES.has(facingMode)) {
+    return { success: false, message: 'Choose Front or Back camera.' };
+  }
+  if (!isStreaming || !localStream) {
+    return { success: false, message: 'Start the Camera Console before switching cameras.' };
+  }
+  if (cameraSwitchInProgress) {
+    return { success: false, message: 'A camera switch is already in progress.' };
+  }
+  if (activeFacingMode === facingMode) {
+    updateFacingControls(facingMode);
+    return { success: true, facingMode, message: `${facingLabel(facingMode)} camera is already active.` };
+  }
+
+  cameraSwitchInProgress = true;
+  updateFacingControls(activeFacingMode, true);
+  showCameraSwitchStatus(`Switching to ${facingLabel(facingMode).toLowerCase()} camera…`);
+
+  let replacementStream = null;
+  let newVideoTrack = null;
+  let replacedSenders = [];
+  const oldVideoTrack = localStream.getVideoTracks()[0];
+  try {
+    replacementStream = await navigator.mediaDevices.getUserMedia({
+      video: cameraVideoConstraints(facingMode, true),
+      audio: false
+    });
+    newVideoTrack = replacementStream.getVideoTracks()[0];
+    if (!newVideoTrack) throw new Error('The selected camera did not provide a video track.');
+
+    const nextLocalStream = new MediaStream([...localStream.getAudioTracks(), newVideoTrack]);
+    const previewEl = document.getElementById('webcam-preview');
+    if (!previewEl) throw new Error('The local camera preview is unavailable.');
+
+    const videoSenders = Object.values(peerConnections)
+      .flatMap((pc) => pc.getSenders())
+      .filter((sender) => sender.track === oldVideoTrack);
+    const replacements = await Promise.allSettled(videoSenders.map((sender) => sender.replaceTrack(newVideoTrack)));
+    if (replacements.some((result) => result.status === 'rejected')) {
+      replacedSenders = videoSenders.filter((_, index) => replacements[index].status === 'fulfilled');
+      await Promise.allSettled(replacedSenders.map((sender) => sender.replaceTrack(oldVideoTrack)));
+      replacedSenders = [];
+      throw new Error('The live connection could not switch video tracks.');
+    }
+    replacedSenders = videoSenders;
+
+    detachTrackEndListener(oldVideoTrack);
+    newVideoTrack.addEventListener('ended', handleLocalStreamEnded);
+    localStream = nextLocalStream;
+    previewEl.srcObject = localStream;
+    prevFrameData = null;
+    activeFacingMode = getTrackFacingMode(newVideoTrack) || facingMode;
+    writePreference(CAMERA_FACING_STORAGE_KEY, activeFacingMode);
+    updateFacingControls(activeFacingMode, true);
+    showCameraSwitchStatus(`${facingLabel(activeFacingMode)} camera active.`);
+    oldVideoTrack?.stop();
+    return { success: true, facingMode: activeFacingMode, message: `${facingLabel(activeFacingMode)} camera active.` };
+  } catch (error) {
+    console.warn(`Could not switch to ${facingMode} camera:`, error);
+    if (replacedSenders.length > 0 && localStream?.getVideoTracks()[0] === oldVideoTrack) {
+      await Promise.allSettled(replacedSenders.map((sender) => sender.replaceTrack(oldVideoTrack)));
+    }
+    newVideoTrack?.stop();
+    showCameraSwitchStatus(`${facingLabel(facingMode)} camera is unavailable. Current camera is still active.`, true);
+    return {
+      success: false,
+      facingMode: activeFacingMode,
+      message: `${facingLabel(facingMode)} camera is unavailable. Current camera is still active.`
+    };
+  } finally {
+    replacementStream?.getTracks().forEach((track) => {
+      if (track !== newVideoTrack) track.stop();
+    });
+    cameraSwitchInProgress = false;
+    updateFacingControls(activeFacingMode);
+  }
+}
+
 function stopCamera() {
   // Stop media tracks
   if (localStream) {
-    localStream.getTracks().forEach(track => track.stop());
+    localStream.getTracks().forEach(track => {
+      detachTrackEndListener(track);
+      track.stop();
+    });
     localStream = null;
   }
   
@@ -248,6 +447,9 @@ function stopCamera() {
   document.getElementById('rec-indicator').style.display = 'none';
   
   isStreaming = false;
+  cameraSwitchInProgress = false;
+  updateFacingControls(activeFacingMode);
+  showCameraSwitchStatus();
   updateCameraStatus('offline');
 }
 
@@ -328,6 +530,11 @@ function connectSocket() {
     } else if (action === 'stop') {
       stopSiren();
     }
+  });
+
+  socket.on('camera:switch', async ({ facingMode } = {}, acknowledge) => {
+    const result = await switchCamera(facingMode);
+    if (typeof acknowledge === 'function') acknowledge(result);
   });
 }
 

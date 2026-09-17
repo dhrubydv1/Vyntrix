@@ -89,6 +89,30 @@
           <div class="controls-grid">
             <div class="control-card">
               <div class="control-header">
+                <span>Camera</span>
+              </div>
+              <div class="segmented-control" role="group" aria-label="Remote camera facing direction">
+                <button type="button" class="segment-button" id="remote-camera-facing-user" data-facing-mode="user" aria-pressed="false">Front</button>
+                <button type="button" class="segment-button" id="remote-camera-facing-environment" data-facing-mode="environment" aria-pressed="false">Back</button>
+              </div>
+              <p class="control-feedback" id="remote-camera-switch-status" role="status" aria-live="polite"></p>
+            </div>
+
+            <div class="control-card">
+              <div class="switch-container">
+                <div>
+                  <h4>Mirror View</h4>
+                  <p class="control-description">Change this monitor only</p>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="toggle-mirror-view" aria-label="Mirror remote video view">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="control-card">
+              <div class="control-header">
                 <span>Digital Zoom</span>
                 <span class="slider-val" id="zoom-val">1x</span>
               </div>

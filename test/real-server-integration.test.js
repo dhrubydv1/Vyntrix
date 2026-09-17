@@ -73,6 +73,15 @@ function waitForEvent(socket, eventName, timeoutMs = 1000) {
   });
 }
 
+function emitWithAck(socket, eventName, payload, timeoutMs = 1000) {
+  return new Promise((resolve, reject) => {
+    socket.timeout(timeoutMs).emit(eventName, payload, (error, response) => {
+      if (error) reject(error);
+      else resolve(response);
+    });
+  });
+}
+
 function connectSocket(cookie, { reconnection = false } = {}) {
   const socket = io(baseUrl, {
     transports: ['websocket'],
@@ -239,7 +248,7 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     assert.deepStrictEqual(camerasForB.map(camera => camera.cameraName), ['User B Camera']);
   });
 
-  it('blocks cross-user signaling and siren commands', async () => {
+  it('blocks cross-user signaling, siren, and camera-switch commands', async () => {
     const userA = await register(`socket_command_a_${Date.now()}`);
     const userB = await register(`socket_command_b_${Date.now()}`);
     const monitorA = await connectSocket(userA.cookie);
@@ -249,8 +258,10 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
 
     let receivedSignal = false;
     let receivedSiren = false;
+    let receivedCameraSwitch = false;
     cameraB.on('webrtc-signal', () => { receivedSignal = true; });
     cameraB.on('trigger-siren', () => { receivedSiren = true; });
+    cameraB.on('camera:switch', () => { receivedCameraSwitch = true; });
 
     monitorA.emit('webrtc-signal', {
       targetSocketId: cameraB.id,
@@ -260,10 +271,39 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
       targetSocketId: cameraB.id,
       action: 'start'
     });
+    const switchResult = await emitWithAck(monitorA, 'camera:switch', {
+      targetSocketId: cameraB.id,
+      facingMode: 'user'
+    });
 
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.strictEqual(receivedSignal, false);
     assert.strictEqual(receivedSiren, false);
+    assert.strictEqual(receivedCameraSwitch, false);
+    assert.strictEqual(switchResult.success, false);
+  });
+
+  it('forwards camera-switch commands only to a same-user registered camera', async () => {
+    const user = await register(`socket_switch_${Date.now()}`);
+    const monitor = await connectSocket(user.cookie);
+    const camera = await connectSocket(user.cookie);
+    await registerDevice(monitor, 'monitor');
+    await registerDevice(camera, 'camera', 'Switchable Camera');
+
+    camera.on('camera:switch', ({ facingMode }, acknowledge) => {
+      acknowledge({ success: true, facingMode, message: 'Camera switched.' });
+    });
+
+    const result = await emitWithAck(monitor, 'camera:switch', {
+      targetSocketId: camera.id,
+      facingMode: 'environment'
+    });
+
+    assert.deepStrictEqual(result, {
+      success: true,
+      facingMode: 'environment',
+      message: 'Camera switched.'
+    });
   });
 
   it('removes stale camera registrations and supports authenticated reconnect registration', async () => {

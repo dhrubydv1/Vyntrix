@@ -10,6 +10,10 @@ let availableCameras = [];
 let monitorConnectionAttempt = 0;
 let monitorReconnectTimer = null;
 let iceServers = null;
+let remoteCameraSwitchInProgress = false;
+
+const MONITOR_MIRROR_STORAGE_KEY = 'vyntrix.monitor.mirrorView';
+const VALID_FACING_MODES = new Set(['user', 'environment']);
 
 // Audio variables for Walkie Talkie mic
 let micStream = null;
@@ -56,11 +60,25 @@ function setupDOMListeners() {
   const zoomSlider = document.getElementById('control-zoom');
   const zoomText = document.getElementById('zoom-val');
   const videoEl = document.getElementById('remote-video');
+  const mirrorToggle = document.getElementById('toggle-mirror-view');
+  mirrorToggle.checked = readBooleanPreference(MONITOR_MIRROR_STORAGE_KEY);
+  applyRemoteMirror(mirrorToggle.checked);
+
+  mirrorToggle.addEventListener('change', (event) => {
+    const mirrored = event.target.checked;
+    writePreference(MONITOR_MIRROR_STORAGE_KEY, String(mirrored));
+    applyRemoteMirror(mirrored);
+  });
+
+  document.querySelectorAll('[data-facing-mode]').forEach((button) => {
+    button.addEventListener('click', () => requestRemoteCameraSwitch(button.dataset.facingMode));
+  });
+
   zoomSlider.addEventListener('input', (e) => {
     const val = parseFloat(e.target.value);
     zoomText.innerText = `${val}x`;
     if (videoEl) {
-      videoEl.style.transform = `scale(${val})`;
+      videoEl.style.setProperty('--video-zoom', val);
     }
   });
 
@@ -119,6 +137,66 @@ function setupDOMListeners() {
   pttButton.addEventListener('mouseup', stopTalking);
   pttButton.addEventListener('touchend', stopTalking, { passive: false });
   pttButton.addEventListener('mouseleave', stopTalking);
+}
+
+function readBooleanPreference(key) {
+  try {
+    return localStorage.getItem(key) === 'true';
+  } catch (_) {
+    return false;
+  }
+}
+
+function writePreference(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (_) {
+    // Display preferences are optional when browser storage is unavailable.
+  }
+}
+
+function applyRemoteMirror(mirrored) {
+  document.getElementById('remote-video')?.classList.toggle('video-mirrored', mirrored);
+}
+
+function updateRemoteFacingControls(facingMode = null, disabled = false) {
+  document.querySelectorAll('[data-facing-mode]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.facingMode === facingMode));
+    button.disabled = disabled;
+  });
+}
+
+function showRemoteCameraSwitchStatus(message = '', isError = false) {
+  const status = document.getElementById('remote-camera-switch-status');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('is-error', isError);
+}
+
+function requestRemoteCameraSwitch(facingMode) {
+  if (!VALID_FACING_MODES.has(facingMode) || remoteCameraSwitchInProgress) return;
+  if (!socket?.connected || !activeCameraSocketId) {
+    showRemoteCameraSwitchStatus('Connect to a camera before switching.', true);
+    return;
+  }
+
+  remoteCameraSwitchInProgress = true;
+  updateRemoteFacingControls(null, true);
+  showRemoteCameraSwitchStatus(`Requesting ${facingMode === 'user' ? 'front' : 'back'} camera…`);
+  socket.timeout(12000).emit('camera:switch', {
+    targetSocketId: activeCameraSocketId,
+    facingMode
+  }, (timeoutError, result) => {
+    remoteCameraSwitchInProgress = false;
+    const response = timeoutError ? null : result;
+    if (response?.success) {
+      updateRemoteFacingControls(response.facingMode || facingMode);
+      showRemoteCameraSwitchStatus(response.message || 'Camera switched.');
+      return;
+    }
+    updateRemoteFacingControls(response?.facingMode || null);
+    showRemoteCameraSwitchStatus(response?.message || 'Camera could not be switched. Try again.', true);
+  });
 }
 
 function setupTimeCounter() {
@@ -361,10 +439,12 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
   document.getElementById('zoom-val').innerText = '1x';
   document.getElementById('control-nightvision').checked = false;
   document.getElementById('control-siren').checked = false;
+  updateRemoteFacingControls();
+  showRemoteCameraSwitchStatus();
   
   const videoEl = document.getElementById('remote-video');
   videoEl.classList.remove('night-vision-mode');
-  videoEl.style.transform = 'scale(1)';
+  videoEl.style.setProperty('--video-zoom', 1);
 
   // Setup local audio track for PTT (Walkie-Talkie)
   try {
@@ -458,6 +538,9 @@ function backToCameraList() {
   activeCameraSocketId = null;
   activeCameraName = null;
   userNavigatedBack = true; // Block auto-connecting until reset
+  remoteCameraSwitchInProgress = false;
+  updateRemoteFacingControls();
+  showRemoteCameraSwitchStatus();
 
   // Stop video element
   const videoEl = document.getElementById('remote-video');

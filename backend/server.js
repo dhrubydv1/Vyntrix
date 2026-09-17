@@ -349,6 +349,39 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Forward a camera-facing request only from an authenticated monitor to a
+  // registered camera owned by the same user. The camera reports the actual
+  // switch result through the Socket.IO acknowledgement.
+  socket.on('camera:switch', ({ targetSocketId, facingMode } = {}, acknowledge) => {
+    const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
+    if (!socket.userId || socket.deviceType !== 'monitor') {
+      reply({ success: false, message: 'Only an authenticated monitor can switch a camera.' });
+      return;
+    }
+    if (!targetSocketId || !['user', 'environment'].includes(facingMode)) {
+      reply({ success: false, message: 'Choose Front or Back camera.' });
+      return;
+    }
+
+    const camera = activeCameras[targetSocketId];
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (!camera || camera.userId !== socket.userId || !targetSocket
+      || targetSocket.userId !== socket.userId || targetSocket.deviceType !== 'camera') {
+      reply({ success: false, message: 'That camera is unavailable.' });
+      return;
+    }
+
+    targetSocket.timeout(10000).emit('camera:switch', { facingMode }, (error, result) => {
+      if (error) {
+        reply({ success: false, message: 'The camera did not respond. Try again.' });
+        return;
+      }
+      reply(result && typeof result.success === 'boolean'
+        ? result
+        : { success: false, message: 'The camera returned an invalid response.' });
+    });
+  });
+
   // Handle Disconnection
   socket.on('disconnect', () => {
     if (socket.deviceType === 'camera') {
