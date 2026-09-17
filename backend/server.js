@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const session = require('express-session');
-const FileStore = require('session-file-store')(session);
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 
@@ -34,13 +33,27 @@ if (isProduction && !process.env.SESSION_SECRET) {
 if (isProduction) app.set('trust proxy', 1);
 
 // Session Configuration
+const useFileSessionStore = !isProduction && process.env.VYNTRIX_DATABASE_MODE === 'json';
+const sessionStore = useFileSessionStore
+  ? new (require('session-file-store')(session))({
+      path: path.join(DATA_DIR, 'sessions'),
+      logFn: () => {}
+    })
+  : new (require('connect-pg-simple')(session))({
+      pool: require('./postgres').pool,
+      schemaName: 'public',
+      tableName: 'user_sessions',
+      createTableIfMissing: false,
+      pruneSessionInterval: 15 * 60,
+      errorLog: (message, error) => {
+        console.error(message, error instanceof Error ? error.message : error);
+      }
+    });
+
 const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET || 'development-only-change-this-secret',
   name: 'sasta_cctv_session',
-  store: new FileStore({
-    path: path.join(DATA_DIR, 'sessions'),
-    logFn: () => {}
-  }),
+  store: sessionStore,
   resave: false,
   saveUninitialized: false,
   cookie: {

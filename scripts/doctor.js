@@ -130,7 +130,7 @@ if (fs.existsSync(lockPath)) {
 if (!fs.existsSync(nodeModulesPath)) {
   fail('node_modules is missing. Run npm install (or the platform setup assistant).');
 } else {
-  const requiredPackages = ['bcryptjs', 'dotenv', 'express', 'express-rate-limit', 'express-session', 'session-file-store', 'socket.io'];
+  const requiredPackages = ['bcryptjs', 'connect-pg-simple', 'dotenv', 'express', 'express-rate-limit', 'express-session', 'session-file-store', 'socket.io'];
   const missingPackages = requiredPackages.filter((name) => !fs.existsSync(path.join(nodeModulesPath, name, 'package.json')));
   if (missingPackages.length) {
     fail(`Missing installed dependencies: ${missingPackages.join(', ')}. Run npm install.`);
@@ -184,7 +184,17 @@ if (effectiveEnv.VYNTRIX_DATA_DIR) {
   ok('Runtime data will use the default ./data directory.');
 }
 
-for (const legacyVariable of ['DATABASE_URL', 'BLOB_READ_WRITE_TOKEN', 'ABLY_API_KEY']) {
+const usesJsonCompatibilityMode = effectiveEnv.NODE_ENV !== 'production'
+  && effectiveEnv.VYNTRIX_DATABASE_MODE === 'json';
+if (usesJsonCompatibilityMode) {
+  ok('JSON compatibility mode is enabled for local testing; file-backed sessions will be used.');
+} else if (hasConfiguredValue(effectiveEnv.DATABASE_URL)) {
+  ok('DATABASE_URL is configured for PostgreSQL data and sessions.');
+} else {
+  fail('DATABASE_URL is required for PostgreSQL data and sessions.');
+}
+
+for (const legacyVariable of ['BLOB_READ_WRITE_TOKEN', 'ABLY_API_KEY']) {
   if (effectiveEnv[legacyVariable]) {
     warn(`${legacyVariable} is set but is not used by the current local-only codebase.`);
   } else {
@@ -209,7 +219,11 @@ if (fs.existsSync(dataDirectory)) {
 
 if (fs.existsSync(dataDirectory)) {
   checkDirectory(path.join(dataDirectory, 'alerts'), 'Alert image directory');
-  checkDirectory(path.join(dataDirectory, 'sessions'), 'Session directory');
+  if (usesJsonCompatibilityMode) {
+    checkDirectory(path.join(dataDirectory, 'sessions'), 'Test session directory');
+  } else {
+    ok('PostgreSQL session storage is enabled; the local session directory is not used.');
+  }
 
   const databasePath = path.join(dataDirectory, 'database.json');
   const temporaryDatabasePath = `${databasePath}.tmp`;

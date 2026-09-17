@@ -112,7 +112,8 @@ PORT=8080 SESSION_SECRET='replace-with-a-long-random-secret' npm start
 | `VYNTRIX_FRONTEND_ORIGIN` | unset | Exact frontend origin allowed for cross-origin API and Socket.IO requests. |
 | `SESSION_SECRET` | development fallback | Secret used to sign login sessions. It is required when `NODE_ENV=production`. |
 | `NODE_ENV` | unset | Set to `production` behind HTTPS so session cookies are marked secure. |
-| `VYNTRIX_DATA_DIR` | `./data` | Optional directory for runtime JSON data, alert images, and sessions. |
+| `DATABASE_URL` | required | PostgreSQL connection used for users, alerts, and sessions. |
+| `VYNTRIX_DATA_DIR` | `./data` | Optional directory for compatibility-mode JSON data and legacy alert images. |
 | `VYNTRIX_ALERT_MAX_IMAGE_BYTES` | `2097152` | Maximum decoded alert image size; maximum supported value is 2 MB. |
 | `VYNTRIX_MAX_ALERTS_PER_USER` | `100` | Maximum retained alerts per user; oldest alerts are removed when the limit is reached. |
 | `VYNTRIX_ALERT_UPLOAD_LIMIT` | `60` | Maximum alert uploads per user during the configured window. |
@@ -241,11 +242,12 @@ npm audit       # check dependency advisories
 
 ## Deployment status
 
-The app can run on a single long-running Node.js server with HTTPS and a
-persistent writable disk mounted for `data/`. It is not compatible with
-serverless hosts, and its JSON database and file-backed session store do not
-support multiple application instances. Configure an authenticated TURN server
-before relying on remote viewing across restrictive networks.
+The app can run on a long-running Node.js server with HTTPS. Users, alert
+metadata, and login sessions use PostgreSQL, so sessions survive backend
+restarts and can be shared by multiple application instances. Legacy snapshot
+files still require persistent local storage when that compatibility path is
+used. Configure an authenticated TURN server before relying on remote viewing
+across restrictive networks.
 
 ## Current limitations / roadmap
 

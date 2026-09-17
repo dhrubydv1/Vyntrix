@@ -10,7 +10,6 @@ const { pool } = require('./postgres');
 
 // Optional legacy alert images remain local and are served only after ownership checks.
 const UPLOADS_DIR = path.join(DATA_DIR, 'alerts');
-const SESSIONS_DIR = path.join(DATA_DIR, 'sessions');
 const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/;
 
 function storageError(message, cause, code = 'STORAGE_WRITE_FAILED') {
@@ -31,7 +30,6 @@ function ensureWritableDirectory(directory, label) {
 
 function init() {
   ensureWritableDirectory(DATA_DIR, 'Runtime data directory');
-  ensureWritableDirectory(SESSIONS_DIR, 'Session directory');
 }
 
 function withoutPasswordHash(user) {
