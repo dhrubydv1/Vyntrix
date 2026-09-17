@@ -11,13 +11,13 @@
   <script src="/js/auth.js"></script>
 </head>
 
-<body>
+<body class="home-page">
   <!-- Header & Navigation -->
   <header>
     <div class="nav-container">
       <a class="nav-logo" href="/">
         <div class="logo-icon">
-          <span>S</span>
+          <span>V</span>
           <div class="logo-dot"></div>
         </div>
         <div class="logo-text">Vyntrix</div>
@@ -46,7 +46,7 @@
           </div>
           <h1 class="hero-title">Turn your old phone into a <span>Security Camera</span>.</h1>
           <p class="hero-desc">
-            Don't throw away your old smartphones! Vyntrix lets you repurpose any unused Android, iOS, or laptop device into a fully featured home security camera. Watch live streams from anywhere, receive instant motion detection alerts, and stay connected with two-way audio — all completely FREE.
+            Repurpose an unused phone or laptop as a practical home camera. View a live feed, receive motion-event alerts, and use two-way audio from your everyday browser.
           </p>
           <div class="hero-actions">
             <a href="/monitor.html" class="btn btn-primary">Go to Web Monitor</a>
@@ -100,19 +100,18 @@
         </div>
       </section>
 
-      <!-- METRICS INFO -->
-      <div style="display: flex; flex-wrap: wrap; justify-content: space-around; gap: 2rem; padding: 2rem 0; margin-bottom: 2rem; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);">
-        <div style="text-align: center;">
-          <h3 style="color: var(--accent-neon); font-size: 2.2rem;">2019</h3>
-          <p style="color: var(--text-secondary); font-size: 0.9rem;">Serving users since 2019</p>
+      <div class="trust-strip" aria-label="Vyntrix highlights">
+        <div class="trust-item">
+          <span class="trust-icon" aria-hidden="true">01</span>
+          <div><strong>Reuse your hardware</strong><span>No dedicated camera required</span></div>
         </div>
-        <div style="text-align: center;">
-          <h3 style="color: var(--accent-cyan); font-size: 2.2rem;">1M+</h3>
-          <p style="color: var(--text-secondary); font-size: 0.9rem;">Active camera streams globally</p>
+        <div class="trust-item">
+          <span class="trust-icon" aria-hidden="true">02</span>
+          <div><strong>Set up in a browser</strong><span>Camera and monitor work on the web</span></div>
         </div>
-        <div style="text-align: center;">
-          <h3 style="color: var(--accent-neon); font-size: 2.2rem;">0 ₹</h3>
-          <p style="color: var(--text-secondary); font-size: 0.9rem;">100% Free Including All Features</p>
+        <div class="trust-item">
+          <span class="trust-icon" aria-hidden="true">03</span>
+          <div><strong>Your private workspace</strong><span>Cameras and alerts stay tied to your account</span></div>
         </div>
       </div>
 
@@ -135,12 +134,12 @@
           <div class="step-item">
             <div class="step-num">2</div>
             <h3 class="step-title">Deploy Cameras</h3>
-            <p class="step-desc">Open Vyntrix on your old device (phone or laptop), choose **Camera Console**, and position the device.</p>
+            <p class="step-desc">Open Vyntrix on your old device, choose <strong>Camera Console</strong>, and position the device.</p>
           </div>
           <div class="step-item">
             <div class="step-num">3</div>
             <h3 class="step-title">Watch Live</h3>
-            <p class="step-desc">Open the **Web Monitor** on your primary phone or PC to watch live feeds and receive real-time motion alerts.</p>
+            <p class="step-desc">Open the <strong>Web Monitor</strong> on your primary phone or computer to watch live feeds and receive motion alerts.</p>
           </div>
         </div>
       </div>
@@ -149,10 +148,10 @@
     <div class="container">
       
       <!-- FEATURES SECTION -->
-      <section style="padding: 4rem 0 2rem 0;">
+      <section class="features-section">
         <div class="section-header">
           <h2>Features Tailored for Safety</h2>
-          <p>Get premium, military-grade security camera features on hardware you already own, completely free.</p>
+          <p>Useful home-monitoring tools on hardware you already own, with a focused interface that works across devices.</p>
         </div>
         
         <div class="features-grid">
@@ -164,7 +163,7 @@
           <div class="feature-card">
             <div class="feature-icon-wrapper">🏃</div>
             <h3>Intelligent Motion Alerts</h3>
-            <p>Smart canvas pixel analysis monitors movements, outlines targets, captures snapshots, and pushes warnings to your dashboard.</p>
+            <p>On-device pixel analysis detects activity and records lightweight motion events in your dashboard.</p>
           </div>
           <div class="feature-card">
             <div class="feature-icon-wrapper">🎙️</div>
@@ -195,11 +194,10 @@
   <!-- FOOTER -->
   <footer>
     <div class="footer-content">
-      <div>&copy; 2026 Vyntrix. Built with style and utility.</div>
+      <div>&copy; 2026 Vyntrix. Practical home monitoring with devices you own.</div>
       <div class="footer-links">
-        <a href="#" class="footer-link">Privacy Policy</a>
-        <a href="#" class="footer-link">Terms of Service</a>
-        <a href="#" class="footer-link">Contact Support</a>
+        <a href="/monitor.html" class="footer-link">Web Monitor</a>
+        <a href="/camera.html" class="footer-link">Camera Console</a>
       </div>
     </div>
   </footer>

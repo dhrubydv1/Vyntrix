@@ -10,13 +10,13 @@
   <script src="/js/auth.js"></script>
 </head>
 
-<body>
+<body class="auth-page">
   <!-- Header & Navigation -->
   <header>
     <div class="nav-container">
       <a class="nav-logo" href="/">
         <div class="logo-icon">
-          <span>S</span>
+          <span>V</span>
           <div class="logo-dot"></div>
         </div>
         <div class="logo-text">Vyntrix</div>
@@ -35,8 +35,9 @@
     <div class="auth-wrapper">
       <div class="auth-card">
         <div class="auth-header">
+          <span class="auth-eyebrow">Create your workspace</span>
           <h2>Create Account</h2>
-          <p>Get started with your free security network</p>
+          <p>Connect your camera and monitor devices in one account.</p>
         </div>
         
         <form id="register-form">
@@ -55,10 +56,10 @@
             <input class="form-input" type="password" id="confirm-password" name="confirm-password" required autocomplete="new-password" placeholder="Confirm your password" minlength="6">
           </div>
 
-          <div class="form-feedback error" id="feedback-error"></div>
-          <div class="form-feedback success" id="feedback-success"></div>
+          <div class="form-feedback error" id="feedback-error" role="alert" aria-live="assertive"></div>
+          <div class="form-feedback success" id="feedback-success" role="status" aria-live="polite"></div>
           
-          <button class="btn btn-primary" type="submit" style="width: 100%; margin-top: 1.5rem; height: 44px;">Sign Up</button>
+          <button class="btn btn-primary auth-submit" type="submit">Create Account</button>
         </form>
 
         <div class="auth-footer">

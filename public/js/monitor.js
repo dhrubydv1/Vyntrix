@@ -246,10 +246,10 @@ function renderCameraSelectionGrid(cameras) {
   if (cameras.length === 0) {
     userNavigatedBack = false; // Reset block since all cameras went offline
     container.innerHTML = `
-      <div style="grid-column: span 3; text-align: center; padding: 3rem; background: var(--bg-card); border: 1px dashed var(--border-color); border-radius: var(--radius-md);">
-        <div style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.6;">📹</div>
-        <h4 style="margin-bottom: 0.5rem;">No Cameras Online</h4>
-        <p style="color: var(--text-secondary); font-size: 0.9rem; max-width: 420px; margin: 0 auto 1.5rem auto;">To start monitoring, open Vyntrix on another phone or computer, name the camera, and click **Start Camera**.</p>
+      <div class="camera-empty-state">
+        <div class="empty-state-icon" aria-hidden="true">📹</div>
+        <h4>No cameras online</h4>
+        <p>Open Vyntrix on another phone or computer, name the camera, and select <strong>Start Camera</strong>.</p>
         <a href="/camera.html" target="_blank" class="btn btn-glass">Open Camera Console</a>
       </div>
     `;
@@ -279,7 +279,7 @@ function renderCameraSelectionGrid(cameras) {
     name.className = 'camera-card-name';
     name.textContent = cam.cameraName;
     const status = document.createElement('div');
-    status.style.cssText = 'font-size: 0.75rem; color: var(--accent-neon);';
+    status.className = 'camera-card-status';
     status.textContent = '● ACTIVE';
     card.append(icon, name, status);
     card.addEventListener('click', () => initiateStreaming(cam.socketId, cam.cameraName));
@@ -300,7 +300,10 @@ function updateMonitorStatus(status) {
     disconnected: 'DISCONNECTED',
     failed: 'FAILED'
   };
-  indicator.classList.add(status === 'live' ? 'streaming' : 'idle');
+  indicator.classList.add(`status-${status}`);
+  if (status === 'live') indicator.classList.add('streaming');
+  else if (status === 'failed') indicator.classList.add('alerting');
+  else indicator.classList.add('idle');
   text.innerText = labels[status] || 'DISCONNECTED';
 }
 
@@ -536,7 +539,7 @@ function renderAlertList() {
     } else {
       const placeholder = document.createElement('span');
       placeholder.className = 'alert-thumbnail-placeholder';
-      placeholder.textContent = 'MOTION';
+      placeholder.textContent = 'Motion';
       placeholder.setAttribute('aria-label', 'Motion event without snapshot');
       thumbnail.appendChild(placeholder);
       item.classList.add('metadata-only');

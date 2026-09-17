@@ -12,13 +12,13 @@
   <script src="/js/ice-config.js"></script>
 </head>
 
-<body>
+<body class="console-page monitor-page">
   <!-- Header & Navigation -->
   <header>
     <div class="nav-container">
       <a class="nav-logo" href="/">
         <div class="logo-icon">
-          <span>S</span>
+          <span>V</span>
           <div class="logo-dot"></div>
         </div>
         <div class="logo-text">Vyntrix</div>
@@ -36,43 +36,46 @@
     <div class="container">
       
       <!-- Camera Selection Mode (when no camera is actively viewed) -->
-      <div id="camera-selection-view" style="margin-bottom: 2rem;">
-        <h2 style="font-family: var(--font-display); font-size: 1.8rem; margin-bottom: 0.5rem;">Select Active Camera</h2>
-        <p style="color: var(--text-secondary); margin-bottom: 1rem;">Choose a connected device below to start monitoring in real-time</p>
+      <div id="camera-selection-view" class="camera-selection-view">
+        <div class="page-heading">
+          <span class="page-eyebrow">Your camera network</span>
+          <h2>Select an active camera</h2>
+          <p>Choose a connected device to begin monitoring in real time.</p>
+        </div>
         
         <div id="camera-list-container" class="camera-selection-grid">
           <!-- Populated dynamically with active cameras -->
-          <div style="grid-column: span 3; text-align: center; padding: 3rem; background: var(--bg-card); border: 1px dashed var(--border-color); border-radius: var(--radius-md);">
-            <div style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.6;">📹</div>
-            <h4 style="margin-bottom: 0.5rem;">No Cameras Online</h4>
-            <p style="color: var(--text-secondary); font-size: 0.9rem; max-width: 420px; margin: 0 auto 1.5rem auto;">To start monitoring, open Vyntrix on another phone or computer, name the camera, and click **Start Camera**.</p>
+          <div class="camera-empty-state">
+            <div class="empty-state-icon" aria-hidden="true">📹</div>
+            <h4>No cameras online</h4>
+            <p>Open Vyntrix on another phone or computer, name the camera, and select <strong>Start Camera</strong>.</p>
             <a href="/camera.html" target="_blank" class="btn btn-glass">Open Camera Console</a>
           </div>
         </div>
       </div>
 
       <!-- Live Monitoring Layout (hidden by default) -->
-      <div id="monitor-portal-view" class="portal-layout" style="display: none;">
+      <div id="monitor-portal-view" class="portal-layout monitor-layout" style="display: none;">
         
         <!-- Live stream console -->
         <div class="stream-card">
           <div class="stream-title-bar">
             <div>
-              <button class="btn btn-secondary" id="btn-back-to-list" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; margin-bottom: 0.5rem; display: inline-flex; align-items: center; gap: 0.3rem;">
+              <button class="btn btn-secondary back-button" id="btn-back-to-list">
                 ← Back to List
               </button>
               <h2 id="active-camera-title">Living Room Camera</h2>
             </div>
-            <div class="stream-status">
-              <div class="status-indicator idle"></div>
+            <div class="stream-status" role="status" aria-live="polite">
+              <div class="status-indicator status-disconnected idle"></div>
               <span id="monitor-connection-status">DISCONNECTED</span>
             </div>
           </div>
 
           <div class="video-container">
             <!-- Dynamic styling hook for filters and zoom -->
-            <div id="video-wrapper" style="width:100%; height:100%; overflow:hidden; border-radius: inherit;">
-              <video class="video-element" id="remote-video" autoplay playsinline></video>
+            <div id="video-wrapper" class="video-wrapper">
+              <video class="video-element" id="remote-video" autoplay playsinline aria-label="Remote camera feed"></video>
             </div>
             <div class="overlay-scanline"></div>
             <div class="overlay-timestamp" id="monitor-time">--:--:--</div>
@@ -90,38 +93,38 @@
                 <span class="slider-val" id="zoom-val">1x</span>
               </div>
               <div class="slider-container">
-                <input type="range" id="control-zoom" min="1" max="4" step="0.1" value="1">
+                <input type="range" id="control-zoom" min="1" max="4" step="0.1" value="1" aria-label="Digital zoom">
               </div>
             </div>
 
             <div class="control-card">
               <div class="switch-container">
                 <div>
-                  <h4 style="font-size: 0.95rem; font-weight: 600;">Night Vision</h4>
-                  <p style="color: var(--text-muted); font-size: 0.75rem;">Digital image enhancer</p>
+                  <h4>Night Vision</h4>
+                  <p class="control-description">Digital image enhancer</p>
                 </div>
                 <label class="switch">
-                  <input type="checkbox" id="control-nightvision">
+                  <input type="checkbox" id="control-nightvision" aria-label="Night vision">
                   <span class="slider"></span>
                 </label>
               </div>
             </div>
 
-            <div class="control-card" style="border-color: rgba(255, 59, 48, 0.25);">
+            <div class="control-card siren-control-card">
               <div class="switch-container">
                 <div>
-                  <h4 style="font-size: 0.95rem; font-weight: 600; color: #ff8e88;">Trigger Siren</h4>
-                  <p style="color: var(--text-muted); font-size: 0.75rem;">Play local alarm on camera</p>
+                  <h4>Trigger Siren</h4>
+                  <p class="control-description">Play local alarm on camera</p>
                 </div>
                 <label class="switch">
-                  <input type="checkbox" id="control-siren">
+                  <input type="checkbox" id="control-siren" aria-label="Remote siren">
                   <span class="slider"></span>
                 </label>
               </div>
             </div>
 
             <div class="control-card">
-              <button class="ptt-btn" id="btn-ptt">
+              <button class="ptt-btn" id="btn-ptt" aria-label="Hold to talk to the camera">
                 <div class="ptt-pulse"></div>
                 <span style="font-size: 1.1rem;">🎤 TALK</span>
                 <span style="font-size: 0.7rem; opacity: 0.8; font-weight: 400;">Hold to talk (Walkie-Talkie)</span>
@@ -131,7 +134,7 @@
         </div>
 
         <!-- Sidebar alerts logs -->
-        <div class="alerts-sidebar">
+        <aside class="alerts-sidebar motion-log-panel" aria-label="Recent motion logs">
           <div class="sidebar-title">
             <span>Recent Motion Logs</span>
             <span class="sidebar-count" id="alerts-count">0 logs</span>
@@ -139,11 +142,12 @@
           
           <div class="alerts-list" id="alerts-list">
             <!-- Alert log cards will populate dynamically -->
-            <div style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; padding: 2rem 0;" id="alerts-empty-state">
-              No motion events captured yet.
+            <div class="alerts-empty-state" id="alerts-empty-state">
+              <span aria-hidden="true">◌</span>
+              No motion events yet
             </div>
           </div>
-        </div>
+        </aside>
 
       </div>
 
@@ -155,7 +159,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3 id="modal-camera-name" style="font-size: 1.25rem;">Camera Event</h3>
-        <button class="modal-close" id="btn-modal-close">&times;</button>
+        <button class="modal-close" id="btn-modal-close" aria-label="Close snapshot viewer">&times;</button>
       </div>
       <div class="modal-body">
         <img src="" id="modal-image" class="modal-img" alt="Captured snapshot">
@@ -170,7 +174,7 @@
   <!-- FOOTER -->
   <footer>
     <div class="footer-content">
-      <div>&copy; 2026 Vyntrix. Built with style and utility.</div>
+      <div>&copy; 2026 Vyntrix. Web Monitor</div>
     </div>
   </footer>
 

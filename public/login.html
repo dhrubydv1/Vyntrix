@@ -10,13 +10,13 @@
   <script src="/js/auth.js"></script>
 </head>
 
-<body>
+<body class="auth-page">
   <!-- Header & Navigation -->
   <header>
     <div class="nav-container">
       <a class="nav-logo" href="/">
         <div class="logo-icon">
-          <span>S</span>
+          <span>V</span>
           <div class="logo-dot"></div>
         </div>
         <div class="logo-text">Vyntrix</div>
@@ -36,8 +36,9 @@
     <div class="auth-wrapper">
       <div class="auth-card">
         <div class="auth-header">
+          <span class="auth-eyebrow">Secure access</span>
           <h2>Welcome Back</h2>
-          <p>Login to view your cameras and alerts</p>
+          <p>Sign in to view your cameras and motion events.</p>
         </div>
         
         <form id="login-form">
@@ -51,10 +52,10 @@
             <input class="form-input" type="password" id="password" name="password" required autocomplete="current-password" placeholder="••••••••">
           </div>
 
-          <div class="form-feedback error" id="feedback-error"></div>
-          <div class="form-feedback success" id="feedback-success"></div>
+          <div class="form-feedback error" id="feedback-error" role="alert" aria-live="assertive"></div>
+          <div class="form-feedback success" id="feedback-success" role="status" aria-live="polite"></div>
           
-          <button class="btn btn-primary" type="submit" style="width: 100%; margin-top: 1.5rem; height: 44px;">Sign In</button>
+          <button class="btn btn-primary auth-submit" type="submit">Sign In</button>
         </form>
 
         <div class="auth-footer">

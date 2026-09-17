@@ -31,12 +31,11 @@ async function updateNavbar() {
     avatar.className = 'user-avatar';
     avatar.textContent = session.user.username.charAt(0).toUpperCase();
     const name = document.createElement('span');
-    name.style.cssText = 'font-size: 0.9rem; font-weight: 500;';
+    name.className = 'user-name';
     name.textContent = session.user.username;
     badge.append(avatar, name);
     const logout = document.createElement('button');
-    logout.className = 'btn btn-secondary';
-    logout.style.cssText = 'padding: 0.5rem 1rem; font-size: 0.85rem;';
+    logout.className = 'btn btn-secondary nav-logout';
     logout.textContent = 'Logout';
     logout.addEventListener('click', handleLogout);
     navActions.replaceChildren(badge, logout);
@@ -69,7 +68,7 @@ function createNavLink(id, href, label, className = 'nav-link') {
   link.id = id;
   link.href = href;
   link.className = className;
-  if (className.startsWith('btn ')) link.style.cssText = 'padding: 0.5rem 1.25rem; font-size: 0.85rem;';
+  if (className.startsWith('btn ')) link.classList.add('nav-auth-link');
   link.textContent = label;
   return link;
 }
