@@ -8,6 +8,7 @@ let isStreaming = false;
 let iceServers = null;
 let activeFacingMode = 'environment';
 let cameraSwitchInProgress = false;
+let cameraDiagnosticsRunning = false;
 
 const CAMERA_FACING_STORAGE_KEY = 'vyntrix.camera.facingMode';
 const CAMERA_MIRROR_STORAGE_KEY = 'vyntrix.camera.mirrorPreview';
@@ -64,6 +65,7 @@ function setupDOMListeners() {
   document.getElementById('btn-start').addEventListener('click', startCamera);
   document.getElementById('btn-stop').addEventListener('click', stopCamera);
   document.getElementById('btn-kill-siren').addEventListener('click', stopSiren);
+  document.getElementById('btn-run-camera-diagnostics').addEventListener('click', runCameraDiagnostics);
   
   // Motion settings update
   const sensitivitySlider = document.getElementById('motion-sensitivity');
@@ -160,6 +162,168 @@ function showCameraSwitchStatus(message = '', isError = false) {
 
 function applyLocalMirror(mirrored) {
   document.getElementById('webcam-preview')?.classList.toggle('video-mirrored', mirrored);
+}
+
+function cameraTrackDiagnostic(track) {
+  if (!track) return null;
+  const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
+  return {
+    label: track.label || '(label unavailable)',
+    readyState: track.readyState,
+    enabled: track.enabled,
+    muted: track.muted,
+    settings,
+    facingMode: settings.facingMode || '(not reported)',
+    deviceId: settings.deviceId || '(not reported)',
+    width: settings.width ?? '(not reported)',
+    height: settings.height ?? '(not reported)'
+  };
+}
+
+function displayActiveTrackDiagnostic() {
+  const output = document.getElementById('diagnostic-active-track');
+  if (!output) return null;
+  const diagnostic = cameraTrackDiagnostic(localStream?.getVideoTracks()[0]);
+  output.textContent = diagnostic
+    ? JSON.stringify(diagnostic, null, 2)
+    : 'No active camera stream.';
+  return diagnostic;
+}
+
+async function enumerateVideoInputsForDiagnostics() {
+  const count = document.getElementById('diagnostic-camera-count');
+  const output = document.getElementById('diagnostic-camera-list');
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices
+      .filter((device) => device.kind === 'videoinput')
+      .map((device, index) => ({
+        index: index + 1,
+        label: device.label || '(label unavailable until camera permission is granted)',
+        deviceId: device.deviceId || '(not reported)',
+        groupId: device.groupId || '(not reported)'
+      }));
+    count.textContent = String(cameras.length);
+    output.textContent = cameras.length > 0
+      ? JSON.stringify(cameras, null, 2)
+      : 'No videoinput devices were reported.';
+    return { success: true, cameras };
+  } catch (error) {
+    const failure = cameraDiagnosticError(error);
+    count.textContent = 'ERROR';
+    output.textContent = `${failure.name}: ${failure.message}`;
+    return { success: false, error: failure };
+  }
+}
+
+function cameraDiagnosticError(error) {
+  return {
+    name: error?.name || 'Error',
+    message: error?.message || 'Unknown camera error',
+    ...(error?.constraint ? { constraint: error.constraint } : {})
+  };
+}
+
+function updateCameraProbeResult(facingMode, strength, result) {
+  const output = document.getElementById(`probe-${facingMode}-${strength}`);
+  if (!output) return;
+  output.classList.remove('is-pass', 'is-fail');
+  if (result === null) {
+    output.textContent = 'RUNNING…';
+    return;
+  }
+  output.classList.add(result.success ? 'is-pass' : 'is-fail');
+  if (result.success) {
+    const track = result.track;
+    output.textContent = `PASS — ${track.label}; facingMode=${track.facingMode}; deviceId=${track.deviceId}; ${track.width}×${track.height}`;
+  } else {
+    const constraint = result.error.constraint ? `; constraint=${result.error.constraint}` : '';
+    output.textContent = `FAIL — ${result.error.name}: ${result.error.message}${constraint}`;
+  }
+}
+
+async function probeCameraConstraint(facingMode, strength) {
+  let temporaryStream = null;
+  const protectedActiveTrack = localStream?.getVideoTracks()[0] || null;
+  try {
+    temporaryStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { [strength]: facingMode } },
+      audio: false
+    });
+    const track = temporaryStream.getVideoTracks()[0];
+    if (!track) {
+      return {
+        success: false,
+        error: { name: 'NoVideoTrackError', message: 'The probe stream contained no video track.' }
+      };
+    }
+    return { success: true, track: cameraTrackDiagnostic(track) };
+  } catch (error) {
+    return { success: false, error: cameraDiagnosticError(error) };
+  } finally {
+    temporaryStream?.getTracks().forEach((track) => {
+      if (track !== protectedActiveTrack) track.stop();
+    });
+  }
+}
+
+async function runCameraDiagnostics() {
+  if (cameraDiagnosticsRunning) return;
+  const button = document.getElementById('btn-run-camera-diagnostics');
+  const status = document.getElementById('camera-diagnostics-status');
+  cameraDiagnosticsRunning = true;
+  button.disabled = true;
+  button.textContent = 'Running…';
+  status.textContent = 'Enumerating cameras and running four temporary video-only probes…';
+  status.classList.remove('is-error');
+
+  const probeDefinitions = [
+    ['user', 'exact'],
+    ['user', 'ideal'],
+    ['environment', 'exact'],
+    ['environment', 'ideal']
+  ];
+  probeDefinitions.forEach(([facingMode, strength]) => updateCameraProbeResult(facingMode, strength, null));
+
+  try {
+    if (!navigator.mediaDevices?.enumerateDevices || !navigator.mediaDevices?.getUserMedia) {
+      throw new Error('This browser does not expose the required mediaDevices APIs.');
+    }
+
+    const devices = await enumerateVideoInputsForDiagnostics();
+    const activeTrackBefore = displayActiveTrackDiagnostic();
+    const probes = {};
+    for (const [facingMode, strength] of probeDefinitions) {
+      const key = `${facingMode}-${strength}`;
+      probes[key] = await probeCameraConstraint(facingMode, strength);
+      updateCameraProbeResult(facingMode, strength, probes[key]);
+    }
+    const activeTrackAfter = displayActiveTrackDiagnostic();
+
+    const diagnosticReport = {
+      videoInputs: devices,
+      activeTrackBefore,
+      probes,
+      activeTrackAfter
+    };
+    console.group('[Vyntrix] Camera Diagnostics');
+    console.log('Video input devices:', diagnosticReport.videoInputs);
+    console.log('Active video track before probes:', diagnosticReport.activeTrackBefore);
+    console.log('Constraint probe results:', diagnosticReport.probes);
+    console.log('Active video track after probes:', diagnosticReport.activeTrackAfter);
+    console.groupEnd();
+
+    status.textContent = 'Diagnostics complete. Results are shown below and in the browser console.';
+  } catch (error) {
+    const failure = cameraDiagnosticError(error);
+    status.textContent = `${failure.name}: ${failure.message}`;
+    status.classList.add('is-error');
+    console.error('[Vyntrix] Camera diagnostics could not run:', failure);
+  } finally {
+    cameraDiagnosticsRunning = false;
+    button.disabled = false;
+    button.textContent = 'Run Diagnostics';
+  }
 }
 
 function setupTimeCounter() {
@@ -284,6 +448,8 @@ async function startCamera() {
     
     const previewEl = document.getElementById('webcam-preview');
     previewEl.srcObject = localStream;
+    displayActiveTrackDiagnostic();
+    enumerateVideoInputsForDiagnostics();
     
     // Set UI state
     document.getElementById('btn-start').style.display = 'none';
@@ -382,6 +548,7 @@ async function switchCamera(facingMode) {
     newVideoTrack.addEventListener('ended', handleLocalStreamEnded);
     localStream = nextLocalStream;
     previewEl.srcObject = localStream;
+    displayActiveTrackDiagnostic();
     prevFrameData = null;
     activeFacingMode = getTrackFacingMode(newVideoTrack) || facingMode;
     writePreference(CAMERA_FACING_STORAGE_KEY, activeFacingMode);
@@ -422,6 +589,7 @@ function stopCamera() {
   
   const previewEl = document.getElementById('webcam-preview');
   previewEl.srcObject = null;
+  displayActiveTrackDiagnostic();
   
   // Stop motion loop
   stopMotionDetection();
