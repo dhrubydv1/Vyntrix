@@ -159,35 +159,15 @@
 
       </div>
 
-      <!-- Temporary camera-selection diagnostics. Keep local to this browser. -->
+      <!-- Local-only camera-selection diagnostics. -->
       <section class="camera-diagnostics" aria-labelledby="camera-diagnostics-title">
-        <div class="camera-diagnostics-header">
-          <div>
-            <span class="page-eyebrow">Temporary debugging</span>
-            <h3 id="camera-diagnostics-title">Camera Diagnostics</h3>
-            <p>Tests browser camera constraints without replacing or stopping the active stream. Results stay on this device.</p>
-          </div>
-          <button type="button" class="btn btn-secondary" id="btn-run-camera-diagnostics">Run Diagnostics</button>
+        <div>
+          <span class="page-eyebrow">Local camera info</span>
+          <h3 id="camera-diagnostics-title">Camera Diagnostics</h3>
         </div>
-
-        <p class="control-feedback" id="camera-diagnostics-status" role="status" aria-live="polite">Not run yet.</p>
-
-        <div class="camera-diagnostics-grid">
-          <div class="diagnostic-block">
-            <h4>Detected Cameras <span class="diagnostic-count" id="diagnostic-camera-count">—</span></h4>
-            <pre id="diagnostic-camera-list">Run diagnostics to enumerate video inputs.</pre>
-          </div>
-          <div class="diagnostic-block">
-            <h4>Active Video Track</h4>
-            <pre id="diagnostic-active-track">No active camera stream.</pre>
-          </div>
-        </div>
-
-        <div class="diagnostic-probes" aria-label="Camera constraint probe results">
-          <div class="diagnostic-probe-row"><span>Front exact</span><strong id="probe-user-exact">NOT RUN</strong></div>
-          <div class="diagnostic-probe-row"><span>Front ideal</span><strong id="probe-user-ideal">NOT RUN</strong></div>
-          <div class="diagnostic-probe-row"><span>Back exact</span><strong id="probe-environment-exact">NOT RUN</strong></div>
-          <div class="diagnostic-probe-row"><span>Back ideal</span><strong id="probe-environment-ideal">NOT RUN</strong></div>
+        <div class="camera-diagnostics-summary" role="status" aria-live="polite">
+          <span>Detected video inputs: <strong id="diagnostic-camera-count">—</strong></span>
+          <span>Selected: <strong id="diagnostic-selected-camera">No active camera</strong></span>
         </div>
       </section>
     </div>

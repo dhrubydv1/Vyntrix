@@ -8,7 +8,9 @@ let isStreaming = false;
 let iceServers = null;
 let activeFacingMode = 'environment';
 let cameraSwitchInProgress = false;
-let cameraDiagnosticsRunning = false;
+let videoInputDevices = [];
+
+const deviceFacingHints = new Map();
 
 const CAMERA_FACING_STORAGE_KEY = 'vyntrix.camera.facingMode';
 const CAMERA_MIRROR_STORAGE_KEY = 'vyntrix.camera.mirrorPreview';
@@ -65,7 +67,6 @@ function setupDOMListeners() {
   document.getElementById('btn-start').addEventListener('click', startCamera);
   document.getElementById('btn-stop').addEventListener('click', stopCamera);
   document.getElementById('btn-kill-siren').addEventListener('click', stopSiren);
-  document.getElementById('btn-run-camera-diagnostics').addEventListener('click', runCameraDiagnostics);
   
   // Motion settings update
   const sensitivitySlider = document.getElementById('motion-sensitivity');
@@ -164,166 +165,82 @@ function applyLocalMirror(mirrored) {
   document.getElementById('webcam-preview')?.classList.toggle('video-mirrored', mirrored);
 }
 
-function cameraTrackDiagnostic(track) {
-  if (!track) return null;
-  const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
-  return {
-    label: track.label || '(label unavailable)',
-    readyState: track.readyState,
-    enabled: track.enabled,
-    muted: track.muted,
-    settings,
-    facingMode: settings.facingMode || '(not reported)',
-    deviceId: settings.deviceId || '(not reported)',
-    width: settings.width ?? '(not reported)',
-    height: settings.height ?? '(not reported)'
-  };
+function cameraLabelMatchesFacing(label, facingMode) {
+  const normalized = label.toLowerCase();
+  const frontPattern = /\b(front|user|selfie|facetime|frontal|face)\b|前置|前面|전면/;
+  const backPattern = /\b(back|rear|environment|world|backside|traseira|trasera)\b|后置|後置|背面|후면/;
+  return (facingMode === 'user' ? frontPattern : backPattern).test(normalized);
 }
 
-function displayActiveTrackDiagnostic() {
-  const output = document.getElementById('diagnostic-active-track');
-  if (!output) return null;
-  const diagnostic = cameraTrackDiagnostic(localStream?.getVideoTracks()[0]);
-  output.textContent = diagnostic
-    ? JSON.stringify(diagnostic, null, 2)
-    : 'No active camera stream.';
-  return diagnostic;
+function inferFacingFromLabel(label) {
+  if (cameraLabelMatchesFacing(label || '', 'user')) return 'user';
+  if (cameraLabelMatchesFacing(label || '', 'environment')) return 'environment';
+  return null;
 }
 
-async function enumerateVideoInputsForDiagnostics() {
-  const count = document.getElementById('diagnostic-camera-count');
-  const output = document.getElementById('diagnostic-camera-list');
+function rememberTrackFacing(track, facingMode) {
+  const settings = track?.getSettings?.() || {};
+  const reportedFacing = getTrackFacingMode(track) || inferFacingFromLabel(track?.label);
+  const knownFacing = reportedFacing || (VALID_FACING_MODES.has(facingMode) ? facingMode : null);
+  if (settings.deviceId && knownFacing) deviceFacingHints.set(settings.deviceId, knownFacing);
+}
+
+async function refreshVideoInputDevices() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const cameras = devices
-      .filter((device) => device.kind === 'videoinput')
-      .map((device, index) => ({
-        index: index + 1,
-        label: device.label || '(label unavailable until camera permission is granted)',
-        deviceId: device.deviceId || '(not reported)',
-        groupId: device.groupId || '(not reported)'
-      }));
-    count.textContent = String(cameras.length);
-    output.textContent = cameras.length > 0
-      ? JSON.stringify(cameras, null, 2)
-      : 'No videoinput devices were reported.';
-    return { success: true, cameras };
+    videoInputDevices = devices.filter((device) => device.kind === 'videoinput');
   } catch (error) {
-    const failure = cameraDiagnosticError(error);
-    count.textContent = 'ERROR';
-    output.textContent = `${failure.name}: ${failure.message}`;
-    return { success: false, error: failure };
+    videoInputDevices = [];
+    console.warn('Could not enumerate video inputs:', error?.name || 'Error', error?.message || 'Unknown error');
   }
+  updateCameraDiagnostics(localStream?.getVideoTracks()[0]);
+  return videoInputDevices;
 }
 
-function cameraDiagnosticError(error) {
-  return {
-    name: error?.name || 'Error',
-    message: error?.message || 'Unknown camera error',
-    ...(error?.constraint ? { constraint: error.constraint } : {})
-  };
-}
-
-function updateCameraProbeResult(facingMode, strength, result) {
-  const output = document.getElementById(`probe-${facingMode}-${strength}`);
-  if (!output) return;
-  output.classList.remove('is-pass', 'is-fail');
-  if (result === null) {
-    output.textContent = 'RUNNING…';
+function updateCameraDiagnostics(track) {
+  const count = document.getElementById('diagnostic-camera-count');
+  const selected = document.getElementById('diagnostic-selected-camera');
+  if (count) count.textContent = String(videoInputDevices.length);
+  if (!selected) return;
+  if (!track) {
+    selected.textContent = 'No active camera';
     return;
   }
-  output.classList.add(result.success ? 'is-pass' : 'is-fail');
-  if (result.success) {
-    const track = result.track;
-    output.textContent = `PASS — ${track.label}; facingMode=${track.facingMode}; deviceId=${track.deviceId}; ${track.width}×${track.height}`;
-  } else {
-    const constraint = result.error.constraint ? `; constraint=${result.error.constraint}` : '';
-    output.textContent = `FAIL — ${result.error.name}: ${result.error.message}${constraint}`;
-  }
+
+  const settings = track.getSettings?.() || {};
+  const deviceIndex = videoInputDevices.findIndex((device) => device.deviceId === settings.deviceId);
+  const ordinal = deviceIndex >= 0 ? `Camera ${deviceIndex + 1} of ${videoInputDevices.length}` : 'Active camera';
+  const facing = getTrackFacingMode(track) || inferFacingFromLabel(track.label) || activeFacingMode;
+  selected.textContent = `${track.label || ordinal}${facing ? ` (${facingLabel(facing)})` : ''}`;
+  console.info('[Vyntrix] Camera selection:', {
+    detectedVideoInputs: videoInputDevices.length,
+    selectedLabel: track.label || ordinal,
+    selectedDeviceIndex: deviceIndex >= 0 ? deviceIndex + 1 : null,
+    facingMode: facing || null,
+    width: settings.width || null,
+    height: settings.height || null
+  });
 }
 
-async function probeCameraConstraint(facingMode, strength) {
-  let temporaryStream = null;
-  const protectedActiveTrack = localStream?.getVideoTracks()[0] || null;
-  try {
-    temporaryStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { [strength]: facingMode } },
-      audio: false
-    });
-    const track = temporaryStream.getVideoTracks()[0];
-    if (!track) {
-      return {
-        success: false,
-        error: { name: 'NoVideoTrackError', message: 'The probe stream contained no video track.' }
-      };
-    }
-    return { success: true, track: cameraTrackDiagnostic(track) };
-  } catch (error) {
-    return { success: false, error: cameraDiagnosticError(error) };
-  } finally {
-    temporaryStream?.getTracks().forEach((track) => {
-      if (track !== protectedActiveTrack) track.stop();
-    });
+function selectCameraDevice(facingMode, currentTrack) {
+  const currentDeviceId = currentTrack?.getSettings?.().deviceId || null;
+  const currentFacing = getTrackFacingMode(currentTrack) || activeFacingMode;
+
+  if (currentDeviceId && currentFacing === facingMode) {
+    return videoInputDevices.find((device) => device.deviceId === currentDeviceId) || null;
   }
-}
 
-async function runCameraDiagnostics() {
-  if (cameraDiagnosticsRunning) return;
-  const button = document.getElementById('btn-run-camera-diagnostics');
-  const status = document.getElementById('camera-diagnostics-status');
-  cameraDiagnosticsRunning = true;
-  button.disabled = true;
-  button.textContent = 'Running…';
-  status.textContent = 'Enumerating cameras and running four temporary video-only probes…';
-  status.classList.remove('is-error');
+  const hinted = videoInputDevices.find((device) => deviceFacingHints.get(device.deviceId) === facingMode);
+  if (hinted) return hinted;
 
-  const probeDefinitions = [
-    ['user', 'exact'],
-    ['user', 'ideal'],
-    ['environment', 'exact'],
-    ['environment', 'ideal']
-  ];
-  probeDefinitions.forEach(([facingMode, strength]) => updateCameraProbeResult(facingMode, strength, null));
+  const labelMatch = videoInputDevices.find((device) => cameraLabelMatchesFacing(device.label || '', facingMode));
+  if (labelMatch) return labelMatch;
 
-  try {
-    if (!navigator.mediaDevices?.enumerateDevices || !navigator.mediaDevices?.getUserMedia) {
-      throw new Error('This browser does not expose the required mediaDevices APIs.');
-    }
-
-    const devices = await enumerateVideoInputsForDiagnostics();
-    const activeTrackBefore = displayActiveTrackDiagnostic();
-    const probes = {};
-    for (const [facingMode, strength] of probeDefinitions) {
-      const key = `${facingMode}-${strength}`;
-      probes[key] = await probeCameraConstraint(facingMode, strength);
-      updateCameraProbeResult(facingMode, strength, probes[key]);
-    }
-    const activeTrackAfter = displayActiveTrackDiagnostic();
-
-    const diagnosticReport = {
-      videoInputs: devices,
-      activeTrackBefore,
-      probes,
-      activeTrackAfter
-    };
-    console.group('[Vyntrix] Camera Diagnostics');
-    console.log('Video input devices:', diagnosticReport.videoInputs);
-    console.log('Active video track before probes:', diagnosticReport.activeTrackBefore);
-    console.log('Constraint probe results:', diagnosticReport.probes);
-    console.log('Active video track after probes:', diagnosticReport.activeTrackAfter);
-    console.groupEnd();
-
-    status.textContent = 'Diagnostics complete. Results are shown below and in the browser console.';
-  } catch (error) {
-    const failure = cameraDiagnosticError(error);
-    status.textContent = `${failure.name}: ${failure.message}`;
-    status.classList.add('is-error');
-    console.error('[Vyntrix] Camera diagnostics could not run:', failure);
-  } finally {
-    cameraDiagnosticsRunning = false;
-    button.disabled = false;
-    button.textContent = 'Run Diagnostics';
+  if (currentDeviceId && videoInputDevices.length === 2) {
+    return videoInputDevices.find((device) => device.deviceId !== currentDeviceId) || null;
   }
+
+  return null;
 }
 
 function setupTimeCounter() {
@@ -448,8 +365,11 @@ async function startCamera() {
     
     const previewEl = document.getElementById('webcam-preview');
     previewEl.srcObject = localStream;
-    displayActiveTrackDiagnostic();
-    enumerateVideoInputsForDiagnostics();
+    const activeVideoTrack = localStream.getVideoTracks()[0];
+    const detectedFacing = getTrackFacingMode(activeVideoTrack) || inferFacingFromLabel(activeVideoTrack?.label);
+    if (detectedFacing) activeFacingMode = detectedFacing;
+    rememberTrackFacing(activeVideoTrack, activeFacingMode);
+    await refreshVideoInputDevices();
     
     // Set UI state
     document.getElementById('btn-start').style.display = 'none';
@@ -484,6 +404,14 @@ function cameraVideoConstraints(facingMode, requireFacingMode = false) {
   };
 }
 
+function cameraDeviceConstraints(deviceId) {
+  return {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    deviceId: { exact: deviceId }
+  };
+}
+
 function getTrackFacingMode(track) {
   const facingMode = track?.getSettings?.().facingMode;
   return VALID_FACING_MODES.has(facingMode) ? facingMode : null;
@@ -495,6 +423,88 @@ function attachTrackEndListeners(stream) {
 
 function detachTrackEndListener(track) {
   track?.removeEventListener('ended', handleLocalStreamEnded);
+}
+
+async function acquireVideoTrack(videoConstraints) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: videoConstraints,
+    audio: false
+  });
+  const track = stream.getVideoTracks()[0];
+  if (!track) {
+    stream.getTracks().forEach((streamTrack) => streamTrack.stop());
+    throw new Error('The selected camera did not provide a video track.');
+  }
+  stream.getTracks().forEach((streamTrack) => {
+    if (streamTrack !== track) streamTrack.stop();
+  });
+  return track;
+}
+
+async function acquireRequestedCamera(device, facingMode, previousDeviceId) {
+  let lastError = null;
+
+  if (device?.deviceId) {
+    try {
+      return await acquireVideoTrack(cameraDeviceConstraints(device.deviceId));
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  // If labels did not identify the lens, inspect each other enumerated device
+  // by exact deviceId and keep only a track that reports the desired facing.
+  const candidates = videoInputDevices.filter((candidate) => (
+    candidate.deviceId
+    && candidate.deviceId !== previousDeviceId
+    && candidate.deviceId !== device?.deviceId
+  ));
+  for (const candidate of candidates) {
+    let candidateTrack = null;
+    try {
+      candidateTrack = await acquireVideoTrack(cameraDeviceConstraints(candidate.deviceId));
+      const detectedFacing = getTrackFacingMode(candidateTrack)
+        || inferFacingFromLabel(candidateTrack.label)
+        || deviceFacingHints.get(candidate.deviceId);
+      if (detectedFacing === facingMode) return candidateTrack;
+    } catch (error) {
+      lastError = error;
+    }
+    candidateTrack?.stop();
+  }
+
+  try {
+    return await acquireVideoTrack(cameraVideoConstraints(facingMode, true));
+  } catch (error) {
+    lastError = error;
+  }
+  throw lastError || new Error('The requested camera is unavailable.');
+}
+
+async function restorePreviousCamera(deviceId, facingMode) {
+  const attempts = [
+    ...(deviceId ? [cameraDeviceConstraints(deviceId)] : []),
+    ...(VALID_FACING_MODES.has(facingMode) ? [cameraVideoConstraints(facingMode, true)] : []),
+    cameraVideoConstraints()
+  ];
+  for (const constraints of attempts) {
+    try {
+      return await acquireVideoTrack(constraints);
+    } catch (_) {
+      // Try the next, less-specific restoration constraint.
+    }
+  }
+  return null;
+}
+
+function installActiveVideoTrack(track, audioTracks, facingMode) {
+  track.addEventListener('ended', handleLocalStreamEnded);
+  localStream = new MediaStream([...audioTracks, track]);
+  document.getElementById('webcam-preview').srcObject = localStream;
+  prevFrameData = null;
+  activeFacingMode = getTrackFacingMode(track) || inferFacingFromLabel(track.label) || facingMode;
+  rememberTrackFacing(track, activeFacingMode);
+  updateCameraDiagnostics(track);
 }
 
 async function switchCamera(facingMode) {
@@ -516,62 +526,68 @@ async function switchCamera(facingMode) {
   updateFacingControls(activeFacingMode, true);
   showCameraSwitchStatus(`Switching to ${facingLabel(facingMode).toLowerCase()} camera…`);
 
-  let replacementStream = null;
   let newVideoTrack = null;
-  let replacedSenders = [];
   const oldVideoTrack = localStream.getVideoTracks()[0];
+  const audioTracks = localStream.getAudioTracks();
+  const oldSettings = oldVideoTrack?.getSettings?.() || {};
+  const previousFacingMode = getTrackFacingMode(oldVideoTrack)
+    || inferFacingFromLabel(oldVideoTrack?.label)
+    || activeFacingMode;
+  const videoSenders = Object.values(peerConnections)
+    .flatMap((pc) => pc.getSenders())
+    .filter((sender) => sender.track === oldVideoTrack);
+
   try {
-    replacementStream = await navigator.mediaDevices.getUserMedia({
-      video: cameraVideoConstraints(facingMode, true),
-      audio: false
+    await refreshVideoInputDevices();
+    const selectedDevice = selectCameraDevice(facingMode, oldVideoTrack);
+    const selectionDescription = selectedDevice?.label || `${facingLabel(facingMode)} facingMode fallback`;
+    console.info('[Vyntrix] Switching camera:', {
+      detectedVideoInputs: videoInputDevices.length,
+      requestedFacingMode: facingMode,
+      selectedLabel: selectionDescription,
+      selectionMethod: selectedDevice ? 'deviceId' : 'facingMode'
     });
-    newVideoTrack = replacementStream.getVideoTracks()[0];
-    if (!newVideoTrack) throw new Error('The selected camera did not provide a video track.');
 
-    const nextLocalStream = new MediaStream([...localStream.getAudioTracks(), newVideoTrack]);
-    const previewEl = document.getElementById('webcam-preview');
-    if (!previewEl) throw new Error('The local camera preview is unavailable.');
+    // Several Android camera stacks cannot open the opposite lens while the
+    // current video track owns the camera hardware. Audio remains untouched.
+    detachTrackEndListener(oldVideoTrack);
+    oldVideoTrack.stop();
 
-    const videoSenders = Object.values(peerConnections)
-      .flatMap((pc) => pc.getSenders())
-      .filter((sender) => sender.track === oldVideoTrack);
+    newVideoTrack = await acquireRequestedCamera(selectedDevice, facingMode, oldSettings.deviceId);
     const replacements = await Promise.allSettled(videoSenders.map((sender) => sender.replaceTrack(newVideoTrack)));
     if (replacements.some((result) => result.status === 'rejected')) {
-      replacedSenders = videoSenders.filter((_, index) => replacements[index].status === 'fulfilled');
-      await Promise.allSettled(replacedSenders.map((sender) => sender.replaceTrack(oldVideoTrack)));
-      replacedSenders = [];
       throw new Error('The live connection could not switch video tracks.');
     }
-    replacedSenders = videoSenders;
 
-    detachTrackEndListener(oldVideoTrack);
-    newVideoTrack.addEventListener('ended', handleLocalStreamEnded);
-    localStream = nextLocalStream;
-    previewEl.srcObject = localStream;
-    displayActiveTrackDiagnostic();
-    prevFrameData = null;
-    activeFacingMode = getTrackFacingMode(newVideoTrack) || facingMode;
+    installActiveVideoTrack(newVideoTrack, audioTracks, facingMode);
     writePreference(CAMERA_FACING_STORAGE_KEY, activeFacingMode);
     updateFacingControls(activeFacingMode, true);
     showCameraSwitchStatus(`${facingLabel(activeFacingMode)} camera active.`);
-    oldVideoTrack?.stop();
+    await refreshVideoInputDevices();
     return { success: true, facingMode: activeFacingMode, message: `${facingLabel(activeFacingMode)} camera active.` };
   } catch (error) {
-    console.warn(`Could not switch to ${facingMode} camera:`, error);
-    if (replacedSenders.length > 0 && localStream?.getVideoTracks()[0] === oldVideoTrack) {
-      await Promise.allSettled(replacedSenders.map((sender) => sender.replaceTrack(oldVideoTrack)));
-    }
+    console.warn(`Could not switch to ${facingMode} camera:`, error?.name || 'Error', error?.message || 'Unknown error');
     newVideoTrack?.stop();
-    showCameraSwitchStatus(`${facingLabel(facingMode)} camera is unavailable. Current camera is still active.`, true);
+    const restoredTrack = await restorePreviousCamera(oldSettings.deviceId, previousFacingMode);
+    if (restoredTrack) {
+      await Promise.allSettled(videoSenders.map((sender) => sender.replaceTrack(restoredTrack)));
+      installActiveVideoTrack(restoredTrack, audioTracks, previousFacingMode);
+      await refreshVideoInputDevices();
+      showCameraSwitchStatus(`${facingLabel(facingMode)} camera could not be opened. Previous camera restored.`, true);
+    } else {
+      localStream = new MediaStream(audioTracks);
+      document.getElementById('webcam-preview').srcObject = localStream;
+      updateCameraDiagnostics(null);
+      showCameraSwitchStatus(`${facingLabel(facingMode)} camera could not be opened, and the previous camera could not be restored.`, true);
+    }
     return {
       success: false,
       facingMode: activeFacingMode,
-      message: `${facingLabel(facingMode)} camera is unavailable. Current camera is still active.`
+      message: restoredTrack
+        ? `${facingLabel(facingMode)} camera could not be opened. Previous camera restored.`
+        : `${facingLabel(facingMode)} camera could not be opened, and the previous camera could not be restored.`
     };
   } finally {
-    replacementStream?.getTracks().forEach((track) => {
-      if (track !== newVideoTrack) track.stop();
-    });
     cameraSwitchInProgress = false;
     updateFacingControls(activeFacingMode);
   }
@@ -589,7 +605,7 @@ function stopCamera() {
   
   const previewEl = document.getElementById('webcam-preview');
   previewEl.srcObject = null;
-  displayActiveTrackDiagnostic();
+  updateCameraDiagnostics(null);
   
   // Stop motion loop
   stopMotionDetection();
