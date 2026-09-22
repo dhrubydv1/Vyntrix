@@ -1886,6 +1886,25 @@ header {
   background: #000;
 }
 
+.monitor-video-container .video-wrapper.is-remote-orientation-corrected {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--remote-oriented-width);
+  height: var(--remote-oriented-height);
+  max-width: none;
+  transform: translate(-50%, -50%) rotate(var(--remote-video-rotation));
+  transform-origin: center;
+}
+
+/* A quarter-turn maps the video's local Y axis to the screen's horizontal
+   axis. Mirror that axis so Mirror View remains a horizontal presentation
+   flip after orientation correction. */
+.video-wrapper.is-remote-orientation-corrected #remote-video.video-mirrored {
+  --video-mirror-x: 1;
+  transform: scaleY(-1) scale(var(--video-zoom));
+}
+
 .monitor-video-container #remote-video {
   object-fit: contain;
   object-position: center;
@@ -2629,6 +2648,12 @@ footer {
   bottom: max(1rem, env(safe-area-inset-bottom));
   min-height: 46px;
   padding-inline: 1rem;
+}
+
+.monitor-video-container:fullscreen .video-wrapper.is-remote-orientation-corrected,
+.monitor-video-container:-webkit-full-screen .video-wrapper.is-remote-orientation-corrected {
+  width: var(--remote-oriented-width);
+  height: var(--remote-oriented-height);
 }
 
 /* V1 product states and interaction polish */
