@@ -47,6 +47,7 @@ function setupDOMListeners() {
   document.getElementById('btn-back-to-list').addEventListener('click', backToCameraList);
   document.getElementById('btn-modal-close').addEventListener('click', closeAlertModal);
   document.getElementById('btn-modal-delete').addEventListener('click', deleteActiveAlert);
+  document.getElementById('btn-toggle-fullscreen').addEventListener('click', toggleMonitorFullscreen);
   
   // Close modal when clicking outside content
   window.addEventListener('click', (e) => {
@@ -63,6 +64,14 @@ function setupDOMListeners() {
   const mirrorToggle = document.getElementById('toggle-mirror-view');
   mirrorToggle.checked = readBooleanPreference(MONITOR_MIRROR_STORAGE_KEY);
   applyRemoteMirror(mirrorToggle.checked);
+
+  videoEl.addEventListener('loadedmetadata', updateRemoteVideoLayout);
+  videoEl.addEventListener('resize', updateRemoteVideoLayout);
+  videoEl.addEventListener('webkitbeginfullscreen', updateFullscreenControls);
+  videoEl.addEventListener('webkitendfullscreen', updateFullscreenControls);
+  document.addEventListener('fullscreenchange', updateFullscreenControls);
+  document.addEventListener('webkitfullscreenchange', updateFullscreenControls);
+  configureFullscreenControl();
 
   mirrorToggle.addEventListener('change', (event) => {
     const mirrored = event.target.checked;
@@ -137,6 +146,90 @@ function setupDOMListeners() {
   pttButton.addEventListener('mouseup', stopTalking);
   pttButton.addEventListener('touchend', stopTalking, { passive: false });
   pttButton.addEventListener('mouseleave', stopTalking);
+}
+
+function updateRemoteVideoLayout() {
+  const videoEl = document.getElementById('remote-video');
+  const stage = document.getElementById('remote-video-stage');
+  if (!videoEl || !stage || !videoEl.videoWidth || !videoEl.videoHeight) return;
+
+  const width = videoEl.videoWidth;
+  const height = videoEl.videoHeight;
+  const orientation = height > width ? 'portrait' : width > height ? 'landscape' : 'square';
+  stage.classList.remove('is-portrait', 'is-landscape', 'is-square');
+  stage.classList.add(`is-${orientation}`);
+  stage.style.setProperty('--remote-video-aspect-ratio', `${width} / ${height}`);
+  stage.dataset.videoOrientation = orientation;
+}
+
+function resetRemoteVideoLayout() {
+  const stage = document.getElementById('remote-video-stage');
+  if (!stage) return;
+  stage.classList.remove('is-portrait', 'is-landscape', 'is-square');
+  stage.style.removeProperty('--remote-video-aspect-ratio');
+  delete stage.dataset.videoOrientation;
+}
+
+function fullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function monitorIsFullscreen() {
+  const stage = document.getElementById('remote-video-stage');
+  const videoEl = document.getElementById('remote-video');
+  return fullscreenElement() === stage || Boolean(videoEl?.webkitDisplayingFullscreen);
+}
+
+function configureFullscreenControl() {
+  const button = document.getElementById('btn-toggle-fullscreen');
+  const stage = document.getElementById('remote-video-stage');
+  const videoEl = document.getElementById('remote-video');
+  const supported = Boolean(
+    stage?.requestFullscreen
+    || stage?.webkitRequestFullscreen
+    || videoEl?.webkitEnterFullscreen
+  );
+  button.disabled = !supported;
+  if (!supported) button.title = 'Full screen is not supported by this browser';
+}
+
+function updateFullscreenControls() {
+  const isFullscreen = monitorIsFullscreen();
+  const button = document.getElementById('btn-toggle-fullscreen');
+  const label = document.getElementById('fullscreen-label');
+  const icon = document.getElementById('fullscreen-icon');
+  button.setAttribute('aria-pressed', String(isFullscreen));
+  button.setAttribute('aria-label', isFullscreen ? 'Exit full screen' : 'Enter full screen');
+  label.textContent = isFullscreen ? 'Exit Full Screen' : 'Full Screen';
+  icon.textContent = isFullscreen ? '×' : '⛶';
+  updateRemoteVideoLayout();
+}
+
+async function toggleMonitorFullscreen() {
+  const stage = document.getElementById('remote-video-stage');
+  const videoEl = document.getElementById('remote-video');
+  try {
+    if (monitorIsFullscreen()) {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      else if (videoEl.webkitExitFullscreen) videoEl.webkitExitFullscreen();
+      return;
+    }
+
+    if (stage.requestFullscreen) await stage.requestFullscreen();
+    else if (stage.webkitRequestFullscreen) stage.webkitRequestFullscreen();
+    else if (videoEl.webkitEnterFullscreen) videoEl.webkitEnterFullscreen();
+  } catch (error) {
+    console.warn('Could not change full-screen mode:', error?.name || 'Error', error?.message || 'Unknown error');
+  }
+}
+
+function exitMonitorFullscreen() {
+  if (!monitorIsFullscreen()) return;
+  const videoEl = document.getElementById('remote-video');
+  if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+  else if (videoEl?.webkitExitFullscreen) videoEl.webkitExitFullscreen();
 }
 
 function readBooleanPreference(key) {
@@ -402,6 +495,7 @@ function cleanupPeerConnection() {
   }
   const videoEl = document.getElementById('remote-video');
   if (videoEl) videoEl.srcObject = null;
+  resetRemoteVideoLayout();
 }
 
 function reconnectToSelectedCamera() {
@@ -487,6 +581,7 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
     console.log('Received track from camera:', event.track.kind);
     if (event.track.kind === 'video') {
       videoEl.srcObject = event.streams[0];
+      updateRemoteVideoLayout();
     }
   };
 
@@ -538,6 +633,7 @@ function backToCameraList() {
   activeCameraSocketId = null;
   activeCameraName = null;
   userNavigatedBack = true; // Block auto-connecting until reset
+  exitMonitorFullscreen();
   remoteCameraSwitchInProgress = false;
   updateRemoteFacingControls();
   showRemoteCameraSwitchStatus();

@@ -72,7 +72,7 @@
             </div>
           </div>
 
-          <div class="video-container">
+          <div class="video-container monitor-video-container" id="remote-video-stage">
             <!-- Dynamic styling hook for filters and zoom -->
             <div id="video-wrapper" class="video-wrapper">
               <video class="video-element" id="remote-video" autoplay playsinline aria-label="Remote camera feed"></video>
@@ -83,6 +83,10 @@
               <div class="rec-dot"></div>
               MONITORING
             </div>
+            <button type="button" class="fullscreen-toggle" id="btn-toggle-fullscreen" aria-label="Enter full screen" aria-pressed="false">
+              <span aria-hidden="true" id="fullscreen-icon">⛶</span>
+              <span id="fullscreen-label">Full Screen</span>
+            </button>
           </div>
 
           <!-- Dash Control panel -->
