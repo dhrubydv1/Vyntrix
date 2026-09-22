@@ -11,9 +11,7 @@ let monitorConnectionAttempt = 0;
 let monitorReconnectTimer = null;
 let iceServers = null;
 let remoteCameraSwitchInProgress = false;
-let remoteFrameOrientation = null;
-let remoteOrientationProbe = null;
-let remoteOrientationProbeTimer = null;
+let remoteVideoRotation = 0;
 let remoteOrientationLayoutFrame = null;
 let remoteStageResizeObserver = null;
 
@@ -75,18 +73,20 @@ function setupDOMListeners() {
   const zoomText = document.getElementById('zoom-val');
   const videoEl = document.getElementById('remote-video');
   const mirrorToggle = document.getElementById('toggle-mirror-view');
+  const rotateButton = document.getElementById('btn-rotate-view');
   mirrorToggle.checked = readBooleanPreference(MONITOR_MIRROR_STORAGE_KEY);
   applyRemoteMirror(mirrorToggle.checked);
+  setRemoteVideoRotation(0);
 
-  videoEl.addEventListener('loadedmetadata', refreshRemoteVideoOrientation);
-  videoEl.addEventListener('resize', refreshRemoteVideoOrientation);
+  videoEl.addEventListener('loadedmetadata', updateRemoteVideoLayout);
+  videoEl.addEventListener('resize', updateRemoteVideoLayout);
   videoEl.addEventListener('webkitbeginfullscreen', updateFullscreenControls);
   videoEl.addEventListener('webkitendfullscreen', updateFullscreenControls);
   document.addEventListener('fullscreenchange', updateFullscreenControls);
   document.addEventListener('webkitfullscreenchange', updateFullscreenControls);
-  window.addEventListener('orientationchange', refreshRemoteVideoOrientation);
+  window.addEventListener('orientationchange', updateRemoteVideoLayout);
   if (screen.orientation?.addEventListener) {
-    screen.orientation.addEventListener('change', refreshRemoteVideoOrientation);
+    screen.orientation.addEventListener('change', updateRemoteVideoLayout);
   }
   const remoteStage = document.getElementById('remote-video-stage');
   if ('ResizeObserver' in window && remoteStage) {
@@ -94,6 +94,7 @@ function setupDOMListeners() {
     remoteStageResizeObserver.observe(remoteStage);
   }
   configureFullscreenControl();
+  rotateButton.addEventListener('click', cycleRemoteVideoRotation);
 
   mirrorToggle.addEventListener('change', (event) => {
     const mirrored = event.target.checked;
@@ -204,39 +205,13 @@ function dimensionOrientation(width, height) {
   return 'square';
 }
 
-function normalizedRotation(rotation) {
-  if (!Number.isFinite(rotation)) return 0;
-  return ((Math.round(rotation / 90) * 90) % 360 + 360) % 360;
-}
-
-function requiredRemoteRotation(videoEl) {
-  if (!remoteFrameOrientation) return 0;
-  const { rotation, rawWidth, rawHeight, displayWidth, displayHeight } = remoteFrameOrientation;
-  if (rotation !== 90 && rotation !== 270) return 0;
-
-  const renderedOrientation = dimensionOrientation(videoEl.videoWidth, videoEl.videoHeight);
-  const rawOrientation = dimensionOrientation(rawWidth, rawHeight);
-  const displayOrientation = dimensionOrientation(displayWidth, displayHeight);
-
-  // VideoFrame display dimensions include its rotation. If the media element
-  // already matches them, the browser has handled orientation and another CSS
-  // rotation would turn an upright feed sideways. Correct only when the element
-  // still matches the unrotated frame dimensions.
-  if (renderedOrientation === displayOrientation) return 0;
-  if (renderedOrientation === rawOrientation && rawOrientation !== displayOrientation) {
-    return rotation;
-  }
-  return 0;
-}
-
 function updateRemoteVideoLayout() {
   const videoEl = document.getElementById('remote-video');
   const stage = document.getElementById('remote-video-stage');
   const wrapper = document.getElementById('video-wrapper');
   if (!videoEl || !stage || !wrapper || !videoEl.videoWidth || !videoEl.videoHeight) return;
 
-  const rotation = requiredRemoteRotation(videoEl);
-  const needsQuarterTurn = rotation === 90 || rotation === 270;
+  const needsQuarterTurn = remoteVideoRotation === 90 || remoteVideoRotation === 270;
   const width = needsQuarterTurn ? videoEl.videoHeight : videoEl.videoWidth;
   const height = needsQuarterTurn ? videoEl.videoWidth : videoEl.videoHeight;
   const orientation = dimensionOrientation(width, height);
@@ -244,13 +219,14 @@ function updateRemoteVideoLayout() {
   stage.classList.add(`is-${orientation}`);
   stage.style.setProperty('--remote-video-aspect-ratio', `${width} / ${height}`);
   stage.dataset.videoOrientation = orientation;
-  wrapper.classList.toggle('is-remote-orientation-corrected', needsQuarterTurn);
-  if (needsQuarterTurn) {
-    wrapper.style.setProperty('--remote-video-rotation', `${rotation}deg`);
-    stage.dataset.orientationCorrection = String(rotation);
+  wrapper.classList.toggle('is-remote-rotated', remoteVideoRotation !== 0);
+  wrapper.classList.toggle('is-remote-quarter-turned', needsQuarterTurn);
+  if (remoteVideoRotation !== 0) {
+    wrapper.style.setProperty('--remote-video-rotation', `${remoteVideoRotation}deg`);
+    stage.dataset.videoRotation = String(remoteVideoRotation);
   } else {
     wrapper.style.removeProperty('--remote-video-rotation');
-    delete stage.dataset.orientationCorrection;
+    delete stage.dataset.videoRotation;
   }
   scheduleRemoteOrientationBoundsUpdate();
 }
@@ -263,92 +239,33 @@ function scheduleRemoteOrientationBoundsUpdate() {
     remoteOrientationLayoutFrame = null;
     const stage = document.getElementById('remote-video-stage');
     const wrapper = document.getElementById('video-wrapper');
-    if (!stage || !wrapper || !wrapper.classList.contains('is-remote-orientation-corrected')) return;
-    wrapper.style.setProperty('--remote-oriented-width', `${stage.clientHeight}px`);
-    wrapper.style.setProperty('--remote-oriented-height', `${stage.clientWidth}px`);
+    if (!stage || !wrapper || !wrapper.classList.contains('is-remote-rotated')) return;
+    const needsQuarterTurn = wrapper.classList.contains('is-remote-quarter-turned');
+    wrapper.style.setProperty('--remote-oriented-width', `${needsQuarterTurn ? stage.clientHeight : stage.clientWidth}px`);
+    wrapper.style.setProperty('--remote-oriented-height', `${needsQuarterTurn ? stage.clientWidth : stage.clientHeight}px`);
   });
 }
 
-function cancelRemoteOrientationProbe() {
-  if (remoteOrientationProbeTimer) {
-    clearTimeout(remoteOrientationProbeTimer);
-    remoteOrientationProbeTimer = null;
-  }
-  if (!remoteOrientationProbe) return;
-  const { reader, track } = remoteOrientationProbe;
-  remoteOrientationProbe = null;
-  reader?.cancel().catch(() => {});
-  track?.stop();
-}
-
-async function inspectRemoteFrameOrientation() {
-  const videoEl = document.getElementById('remote-video');
-  const sourceTrack = videoEl?.srcObject?.getVideoTracks?.()[0];
-  if (!sourceTrack || sourceTrack.readyState !== 'live' || !('MediaStreamTrackProcessor' in window)) return;
-
-  cancelRemoteOrientationProbe();
-  const probeTrack = sourceTrack.clone();
-  let reader = null;
-  let frame = null;
-  let timeoutId = null;
-  try {
-    const processor = new MediaStreamTrackProcessor({ track: probeTrack, maxBufferSize: 1 });
-    reader = processor.readable.getReader();
-    const probe = { reader, track: probeTrack };
-    remoteOrientationProbe = probe;
-    const result = await Promise.race([
-      reader.read(),
-      new Promise((resolve) => {
-        timeoutId = setTimeout(() => resolve(null), 1500);
-      })
-    ]);
-    if (remoteOrientationProbe !== probe || !result?.value) return;
-
-    frame = result.value;
-    const rotation = normalizedRotation(frame.rotation);
-    const visibleRect = frame.visibleRect;
-    remoteFrameOrientation = {
-      rotation,
-      rawWidth: visibleRect?.width || frame.codedWidth,
-      rawHeight: visibleRect?.height || frame.codedHeight,
-      displayWidth: frame.displayWidth,
-      displayHeight: frame.displayHeight
-    };
-    updateRemoteVideoLayout();
-  } catch (error) {
-    // Frame metadata inspection is progressive enhancement. Browsers without a
-    // main-thread processor continue using their native WebRTC orientation.
-    console.debug('Remote frame orientation metadata is unavailable:', error?.name || 'Error');
-  } finally {
-    if (timeoutId) clearTimeout(timeoutId);
-    frame?.close();
-    if (remoteOrientationProbe?.track === probeTrack) remoteOrientationProbe = null;
-    reader?.cancel().catch(() => {});
-    probeTrack.stop();
-  }
-}
-
-function scheduleRemoteOrientationInspection(delay = 100) {
-  if (remoteOrientationProbeTimer) clearTimeout(remoteOrientationProbeTimer);
-  remoteOrientationProbeTimer = setTimeout(() => {
-    remoteOrientationProbeTimer = null;
-    inspectRemoteFrameOrientation();
-  }, delay);
-}
-
-function refreshRemoteVideoOrientation(event) {
-  if (event?.type === 'loadedmetadata' || event?.type === 'resize') {
-    remoteFrameOrientation = null;
+function setRemoteVideoRotation(rotation) {
+  remoteVideoRotation = ((rotation % 360) + 360) % 360;
+  const value = document.getElementById('rotation-val');
+  const button = document.getElementById('btn-rotate-view');
+  if (value) value.textContent = `${remoteVideoRotation}°`;
+  if (button) {
+    const nextRotation = (remoteVideoRotation + 90) % 360;
+    button.setAttribute('aria-label', `Rotate remote video to ${nextRotation} degrees`);
+    button.title = `Current orientation: ${remoteVideoRotation}°. Rotate to ${nextRotation}°.`;
   }
   updateRemoteVideoLayout();
-  scheduleRemoteOrientationInspection();
+}
+
+function cycleRemoteVideoRotation() {
+  setRemoteVideoRotation(remoteVideoRotation + 90);
 }
 
 function resetRemoteVideoLayout() {
   const stage = document.getElementById('remote-video-stage');
   const wrapper = document.getElementById('video-wrapper');
-  cancelRemoteOrientationProbe();
-  remoteFrameOrientation = null;
   if (remoteOrientationLayoutFrame !== null) {
     cancelAnimationFrame(remoteOrientationLayoutFrame);
     remoteOrientationLayoutFrame = null;
@@ -357,10 +274,10 @@ function resetRemoteVideoLayout() {
     stage.classList.remove('is-portrait', 'is-landscape', 'is-square');
     stage.style.removeProperty('--remote-video-aspect-ratio');
     delete stage.dataset.videoOrientation;
-    delete stage.dataset.orientationCorrection;
+    delete stage.dataset.videoRotation;
   }
   if (wrapper) {
-    wrapper.classList.remove('is-remote-orientation-corrected');
+    wrapper.classList.remove('is-remote-rotated', 'is-remote-quarter-turned');
     wrapper.style.removeProperty('--remote-video-rotation');
     wrapper.style.removeProperty('--remote-oriented-width');
     wrapper.style.removeProperty('--remote-oriented-height');
@@ -482,9 +399,7 @@ function requestRemoteCameraSwitch(facingMode) {
     if (response?.success) {
       updateRemoteFacingControls(response.facingMode || facingMode);
       showRemoteCameraSwitchStatus(response.message || 'Camera switched.');
-      remoteFrameOrientation = null;
       updateRemoteVideoLayout();
-      scheduleRemoteOrientationInspection(250);
       return;
     }
     updateRemoteFacingControls(response?.facingMode || null);
@@ -753,10 +668,12 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
     return;
   }
   if (peerConnection && activeCameraSocketId === socketId) return;
+  const cameraChanged = !isReconnect && (activeCameraSocketId !== socketId || activeCameraName !== name);
   cleanupPeerConnection();
   const attempt = ++monitorConnectionAttempt;
   activeCameraSocketId = socketId;
   activeCameraName = name;
+  if (cameraChanged) setRemoteVideoRotation(0);
   updateMonitorStatus(isReconnect ? 'reconnecting' : 'connecting');
 
   // Swap view states
@@ -810,8 +727,7 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
     console.log('Received track from camera:', event.track.kind);
     if (event.track.kind === 'video') {
       videoEl.srcObject = event.streams[0];
-      remoteFrameOrientation = null;
-      refreshRemoteVideoOrientation();
+      updateRemoteVideoLayout();
     }
   };
 
@@ -867,6 +783,7 @@ function backToCameraList() {
   remoteCameraSwitchInProgress = false;
   updateRemoteFacingControls();
   showRemoteCameraSwitchStatus();
+  setRemoteVideoRotation(0);
 
   // Stop video element
   const videoEl = document.getElementById('remote-video');
@@ -1050,7 +967,6 @@ async function deleteAlertItem(id, trigger = null) {
 // Initialise on load
 document.addEventListener('DOMContentLoaded', init);
 window.addEventListener('beforeunload', () => {
-  cancelRemoteOrientationProbe();
   remoteStageResizeObserver?.disconnect();
   if (peerConnection) {
     peerConnection.close();
