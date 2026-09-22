@@ -8,6 +8,7 @@ let isStreaming = false;
 let iceServers = null;
 let activeFacingMode = 'environment';
 let cameraSwitchInProgress = false;
+let cameraStartInProgress = false;
 let videoInputDevices = [];
 
 const deviceFacingHints = new Map();
@@ -40,7 +41,8 @@ let sirenGain = null;
 // Initialize Session & Auth
 async function init() {
   const session = await protectPage();
-  if (session && session.loggedIn) {
+  if (!session?.loggedIn) return;
+  if (session.loggedIn) {
     userId = session.user.id;
     window.CCTV_USER_ID = userId;
     // Suggest default camera name based on browser/OS
@@ -52,7 +54,18 @@ async function init() {
   
   setupDOMListeners();
   setupTimeCounter();
-  await window.VyntrixSocketReady;
+  updateCameraStatus('connecting');
+  showCameraOperationMessage('Connecting securely to Vyntrix…');
+  try {
+    await window.VyntrixSocketReady;
+    updateCameraStatus('offline');
+    showCameraOperationMessage();
+  } catch (err) {
+    console.error('Signaling client could not be loaded:', err);
+    updateCameraStatus('failed');
+    showCameraOperationMessage('Vyntrix could not be reached. Check your connection and reload.', true);
+    return;
+  }
 
   // Auto-start camera if redirect query param is present
   const params = new URLSearchParams(window.location.search);
@@ -159,6 +172,14 @@ function showCameraSwitchStatus(message = '', isError = false) {
   if (!status) return;
   status.textContent = message;
   status.classList.toggle('is-error', isError);
+}
+
+function showCameraOperationMessage(message = '', isError = false) {
+  const messageEl = document.getElementById('camera-operation-message');
+  if (!messageEl) return;
+  messageEl.textContent = message;
+  messageEl.hidden = !message;
+  messageEl.classList.toggle('is-error', isError);
 }
 
 function applyLocalMirror(mirrored) {
@@ -337,6 +358,13 @@ function stopSiren() {
 
 // Media stream functions
 async function startCamera() {
+  if (cameraStartInProgress || isStreaming) return;
+  cameraStartInProgress = true;
+  const startButton = document.getElementById('btn-start');
+  startButton.disabled = true;
+  startButton.textContent = 'Starting…';
+  updateCameraStatus('permission');
+  showCameraOperationMessage('Allow camera and microphone access to start streaming.');
   cameraName = document.getElementById('camera-name').value.trim() || 'Camera';
   const preferredFacingMode = readFacingPreference();
   
@@ -379,6 +407,7 @@ async function startCamera() {
     
     isStreaming = true;
     updateCameraStatus('streaming');
+    showCameraOperationMessage();
 
     iceServers = await getIceServers();
     if (!isStreaming) return;
@@ -389,8 +418,20 @@ async function startCamera() {
     // Start Motion Detection loop
     startMotionDetection();
   } catch (err) {
-    alert('Failed to access camera/microphone: ' + err.message);
     console.error('getUserMedia error:', err);
+    const denied = ['NotAllowedError', 'PermissionDeniedError'].includes(err?.name);
+    const missing = ['NotFoundError', 'DevicesNotFoundError'].includes(err?.name);
+    const message = denied
+      ? 'Camera access was not allowed. Enable camera and microphone permissions, then try again.'
+      : missing
+        ? 'No usable camera was found on this device.'
+        : 'The camera could not be started. Close other camera apps and try again.';
+    updateCameraStatus('failed');
+    showCameraOperationMessage(message, true);
+  } finally {
+    cameraStartInProgress = false;
+    startButton.disabled = false;
+    startButton.textContent = 'Start Camera';
   }
 }
 
@@ -525,6 +566,7 @@ async function switchCamera(facingMode) {
   cameraSwitchInProgress = true;
   updateFacingControls(activeFacingMode, true);
   showCameraSwitchStatus(`Switching to ${facingLabel(facingMode).toLowerCase()} camera…`);
+  updateCameraStatus('switching');
 
   let newVideoTrack = null;
   const oldVideoTrack = localStream.getVideoTracks()[0];
@@ -563,6 +605,7 @@ async function switchCamera(facingMode) {
     writePreference(CAMERA_FACING_STORAGE_KEY, activeFacingMode);
     updateFacingControls(activeFacingMode, true);
     showCameraSwitchStatus(`${facingLabel(activeFacingMode)} camera active.`);
+    updateCameraStatus('streaming');
     await refreshVideoInputDevices();
     return { success: true, facingMode: activeFacingMode, message: `${facingLabel(activeFacingMode)} camera active.` };
   } catch (error) {
@@ -590,6 +633,7 @@ async function switchCamera(facingMode) {
   } finally {
     cameraSwitchInProgress = false;
     updateFacingControls(activeFacingMode);
+    if (isStreaming) updateCameraStatus('streaming');
   }
 }
 
@@ -631,9 +675,11 @@ function stopCamera() {
   document.getElementById('rec-indicator').style.display = 'none';
   
   isStreaming = false;
+  cameraStartInProgress = false;
   cameraSwitchInProgress = false;
   updateFacingControls(activeFacingMode);
   showCameraSwitchStatus();
+  showCameraOperationMessage();
   updateCameraStatus('offline');
 }
 
@@ -647,15 +693,25 @@ function updateCameraStatus(status) {
   if (!dot || !text) return;
 
   dot.className = 'status-indicator';
+  const labels = {
+    connecting: 'CONNECTING',
+    permission: 'AWAITING PERMISSION',
+    switching: 'SWITCHING CAMERA',
+    streaming: 'STREAMING',
+    alerting: '🚨 ALARM TRIPPED',
+    failed: 'NEEDS ATTENTION',
+    offline: 'OFFLINE'
+  };
   if (status === 'streaming') {
     dot.classList.add('streaming');
-    text.innerText = 'STREAMING';
   } else if (status === 'alerting') {
     dot.classList.add('alerting');
-    text.innerText = '🚨 ALARM TRIPPED';
-  } else if (status === 'offline') {
-    text.innerText = 'OFFLINE';
+  } else if (status === 'failed') {
+    dot.classList.add('alerting');
+  } else {
+    dot.classList.add('idle');
   }
+  text.innerText = labels[status] || 'OFFLINE';
 }
 
 // Socket IO setup
@@ -669,11 +725,27 @@ function connectSocket() {
       type: 'camera',
       cameraName
     });
+    if (isStreaming) {
+      updateCameraStatus('streaming');
+      showCameraOperationMessage();
+    }
   });
 
   signalingSocket.on('disconnect', () => {
     console.warn('Signaling server disconnected; cleaning stale monitor peers');
     Object.keys(peerConnections).forEach(cleanPeer);
+    if (isStreaming) {
+      updateCameraStatus('connecting');
+      showCameraOperationMessage('Reconnecting to Vyntrix…');
+    }
+  });
+
+  signalingSocket.on('connect_error', (error) => {
+    console.error('Signaling connection failed:', error);
+    if (isStreaming) {
+      updateCameraStatus('connecting');
+      showCameraOperationMessage('Vyntrix is reconnecting. Your camera remains active on this device.');
+    }
   });
 
   // Relay signals

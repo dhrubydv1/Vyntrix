@@ -22,13 +22,15 @@ let micTrack = null;
 // List of alerts cache
 let alertsCache = [];
 let activeAlert = null; // Currently opened in modal
+const deletingAlertIds = new Set();
 
 // Web Audio API for Notification chimes
 let notifyCtx = null;
 
 async function init() {
   const session = await protectPage();
-  if (session && session.loggedIn) {
+  if (!session?.loggedIn) return;
+  if (session.loggedIn) {
     userId = session.user.id;
     window.CCTV_USER_ID = userId;
   }
@@ -38,9 +40,15 @@ async function init() {
   
   setupDOMListeners();
   setupTimeCounter();
-  iceServers = await getIceServers();
-  await window.VyntrixSocketReady;
-  connectSocket();
+  try {
+    iceServers = await getIceServers();
+    await window.VyntrixSocketReady;
+    connectSocket();
+  } catch (err) {
+    console.error('Monitor services could not be initialized:', err);
+    updateCameraNetworkState('Vyntrix could not be reached. Check your connection and reload.', true);
+    renderCameraSelectionGrid([], 'error');
+  }
 }
 
 function setupDOMListeners() {
@@ -117,7 +125,8 @@ function setupDOMListeners() {
   // Push to Talk (Walkie-Talkie) microphone trigger
   const pttButton = document.getElementById('btn-ptt');
   
-  // Mouse down / Touch start
+  // Pointer and keyboard controls keep hold-to-talk usable without duplicate
+  // mouse/touch events on hybrid devices.
   const startTalking = (e) => {
     e.preventDefault();
     if (!micTrack) {
@@ -141,11 +150,37 @@ function setupDOMListeners() {
     }
   };
 
-  pttButton.addEventListener('mousedown', startTalking);
-  pttButton.addEventListener('touchstart', startTalking, { passive: false });
-  pttButton.addEventListener('mouseup', stopTalking);
-  pttButton.addEventListener('touchend', stopTalking, { passive: false });
-  pttButton.addEventListener('mouseleave', stopTalking);
+  pttButton.addEventListener('pointerdown', startTalking);
+  pttButton.addEventListener('pointerup', stopTalking);
+  pttButton.addEventListener('pointercancel', stopTalking);
+  pttButton.addEventListener('pointerleave', stopTalking);
+  pttButton.addEventListener('keydown', (event) => {
+    if ((event.key === ' ' || event.key === 'Enter') && !event.repeat) startTalking(event);
+  });
+  pttButton.addEventListener('keyup', (event) => {
+    if (event.key === ' ' || event.key === 'Enter') stopTalking(event);
+  });
+}
+
+function updateCameraNetworkState(message, isError = false) {
+  const state = document.getElementById('camera-network-state');
+  if (!state) return;
+  state.textContent = message;
+  state.classList.toggle('is-error', isError);
+}
+
+function updateMonitorVideoState(status) {
+  const overlay = document.getElementById('monitor-video-state');
+  if (!overlay) return;
+  const messages = {
+    connecting: 'Connecting to camera…',
+    reconnecting: 'Camera connection interrupted. Reconnecting…',
+    disconnected: 'Camera is offline.',
+    failed: 'Camera connection failed.'
+  };
+  overlay.textContent = messages[status] || '';
+  overlay.hidden = status === 'live' || !messages[status];
+  overlay.classList.toggle('is-error', status === 'failed' || status === 'disconnected');
 }
 
 function updateRemoteVideoLayout() {
@@ -311,18 +346,27 @@ function connectSocket() {
     socket.emit('register-device', {
       type: 'monitor'
     });
+    updateCameraNetworkState('Looking for online cameras…');
   });
 
   socket.on('disconnect', () => {
     console.warn('Signaling server disconnected');
     cleanupPeerConnection();
     if (activeCameraSocketId) updateMonitorStatus('reconnecting');
+    updateCameraNetworkState('Connection interrupted. Reconnecting…');
+  });
+
+  socket.on('connect_error', (error) => {
+    console.error('Signaling connection failed:', error);
+    updateCameraNetworkState('Vyntrix is waking up or temporarily unreachable. Reconnecting…', true);
+    if (activeCameraSocketId) updateMonitorStatus('reconnecting');
   });
 
   // Camera devices update in workspace
   socket.on('camera-list-update', (cameras) => {
     availableCameras = Array.isArray(cameras) ? cameras : [];
-    renderCameraSelectionGrid(cameras);
+    updateCameraNetworkState(availableCameras.length ? `${availableCameras.length} camera${availableCameras.length === 1 ? '' : 's'} online` : 'No cameras are currently online.');
+    renderCameraSelectionGrid(availableCameras);
     reconnectToSelectedCamera();
   });
 
@@ -410,7 +454,7 @@ function playAlertNotification() {
 }
 
 // Populate grid with online cameras
-function renderCameraSelectionGrid(cameras) {
+function renderCameraSelectionGrid(cameras, state = 'ready') {
   const container = document.getElementById('camera-list-container');
   if (!container) return;
 
@@ -419,16 +463,18 @@ function renderCameraSelectionGrid(cameras) {
     container.innerHTML = `
       <div class="camera-empty-state">
         <div class="empty-state-icon" aria-hidden="true">📹</div>
-        <h4>No cameras online</h4>
-        <p>Open Vyntrix on another phone or computer, name the camera, and select <strong>Start Camera</strong>.</p>
-        <a href="/camera.html" target="_blank" class="btn btn-glass">Open Camera Console</a>
+        <h4>${state === 'error' ? 'Camera network unavailable' : 'No cameras online'}</h4>
+        <p>${state === 'error' ? 'Check your connection, then reload this page.' : 'Open Vyntrix on another phone or computer, name the camera, and select <strong>Start Camera</strong>.'}</p>
+        ${state === 'error' ? '<a href="/monitor.html" class="btn btn-glass">Try Again</a>' : '<a href="/camera.html" target="_blank" rel="noopener" class="btn btn-glass">Open Camera Console</a>'}
       </div>
     `;
     // If active camera went offline, return to list view
     if (activeCameraSocketId) {
       cleanupPeerConnection();
       activeCameraSocketId = null;
-      updateMonitorStatus('reconnecting');
+      document.getElementById('monitor-portal-view').style.display = 'none';
+      document.getElementById('camera-selection-view').style.display = 'block';
+      updateMonitorStatus('disconnected');
     }
     return;
   }
@@ -441,7 +487,8 @@ function renderCameraSelectionGrid(cameras) {
 
   container.innerHTML = '';
   cameras.forEach(cam => {
-    const card = document.createElement('div');
+    const card = document.createElement('button');
+    card.type = 'button';
     card.className = 'camera-card';
     const icon = document.createElement('div');
     icon.className = 'camera-card-icon';
@@ -476,6 +523,7 @@ function updateMonitorStatus(status) {
   else if (status === 'failed') indicator.classList.add('alerting');
   else indicator.classList.add('idle');
   text.innerText = labels[status] || 'DISCONNECTED';
+  updateMonitorVideoState(status);
 }
 
 function cleanupPeerConnection() {
@@ -510,6 +558,29 @@ function reconnectToSelectedCamera() {
   initiateStreaming(camera.socketId, camera.cameraName, true);
 }
 
+async function ensureMicrophoneTrack() {
+  const pttButton = document.getElementById('btn-ptt');
+  if (micTrack?.readyState === 'live' && micStream) {
+    pttButton.disabled = false;
+    return micTrack;
+  }
+  micStream?.getTracks().forEach(track => track.stop());
+  micStream = null;
+  micTrack = null;
+  pttButton.disabled = true;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micTrack = micStream.getAudioTracks()[0] || null;
+    if (micTrack) micTrack.enabled = false;
+    pttButton.disabled = !micTrack;
+    pttButton.title = micTrack ? '' : 'Microphone is unavailable';
+  } catch (err) {
+    console.warn('Microphone permission denied. Walkie-Talkie feature disabled:', err);
+    pttButton.title = 'Allow microphone access to use Talk';
+  }
+  return micTrack;
+}
+
 // Initiate peer collection & stream setup
 async function initiateStreaming(socketId, name, isReconnect = false) {
   if (!socket || !socket.connected) {
@@ -540,15 +611,8 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
   videoEl.classList.remove('night-vision-mode');
   videoEl.style.setProperty('--video-zoom', 1);
 
-  // Setup local audio track for PTT (Walkie-Talkie)
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    micTrack = micStream.getAudioTracks()[0];
-    micTrack.enabled = false; // Muted by default
-  } catch (err) {
-    console.warn('Microphone permission denied. Walkie-Talkie feature disabled:', err);
-    micTrack = null;
-  }
+  // Reuse one microphone stream across reconnect attempts.
+  await ensureMicrophoneTrack();
 
   if (attempt !== monitorConnectionAttempt || !activeCameraSocketId) return;
 
@@ -651,6 +715,7 @@ function backToCameraList() {
     micStream = null;
     micTrack = null;
   }
+  document.getElementById('btn-ptt').disabled = true;
 
   // Swap view states
   document.getElementById('monitor-portal-view').style.display = 'none';
@@ -660,15 +725,20 @@ function backToCameraList() {
 
 // Fetch historical alert logs from database
 async function fetchAlertLogs() {
+  const status = document.getElementById('alerts-status');
+  status.textContent = 'Loading motion events…';
+  status.classList.remove('is-error');
   try {
     const res = await fetch(VyntrixConfig.apiUrl('/api/alerts'), { credentials: 'include' });
+    if (!res.ok) throw new Error(`Alert request returned ${res.status}`);
     const data = await res.json();
-    if (res.ok) {
-      alertsCache = data.alerts;
-      renderAlertList();
-    }
+    alertsCache = Array.isArray(data.alerts) ? data.alerts : [];
+    renderAlertList();
+    status.textContent = '';
   } catch (err) {
     console.error('Failed to retrieve alert logs:', err);
+    status.textContent = 'Motion events could not be loaded. Check your connection and try again.';
+    status.classList.add('is-error');
   }
 }
 
@@ -694,7 +764,7 @@ function renderAlertList() {
   const currentItems = list.querySelectorAll('.alert-item');
   currentItems.forEach(el => el.remove());
 
-  alertsCache.forEach((alert, idx) => {
+  alertsCache.forEach((alert) => {
     const item = document.createElement('div');
     // Highlight first item if it was just loaded via socket (timestamp check/index 0)
     item.className = 'alert-item';
@@ -734,18 +804,18 @@ function renderAlertList() {
     info.append(camera, timestamp);
     const remove = document.createElement('button');
     remove.className = 'alert-delete-btn';
+    remove.type = 'button';
     remove.title = 'Delete event';
+    remove.setAttribute('aria-label', `Delete motion event from ${alert.cameraName}`);
     remove.textContent = '×';
+    remove.addEventListener('click', (event) => {
+      event.stopPropagation();
+      deleteAlertItem(alert.id, remove);
+    });
     item.append(thumbnail, info, remove);
 
     // Click handler to open screenshot modal
-    item.addEventListener('click', (e) => {
-      // Don't open modal if click is on delete button
-      if (e.target.classList.contains('alert-delete-btn')) {
-        e.stopPropagation();
-        deleteAlertItem(alert.id);
-        return;
-      }
+    item.addEventListener('click', () => {
       if (alert.imagePath) openAlertModal(alert);
     });
 
@@ -773,12 +843,17 @@ function closeAlertModal() {
 // Delete alert trigger from modal
 async function deleteActiveAlert() {
   if (!activeAlert) return;
-  await deleteAlertItem(activeAlert.id);
-  closeAlertModal();
+  const deleted = await deleteAlertItem(activeAlert.id, document.getElementById('btn-modal-delete'));
+  if (deleted) closeAlertModal();
 }
 
 // Delete helper call
-async function deleteAlertItem(id) {
+async function deleteAlertItem(id, trigger = null) {
+  if (deletingAlertIds.has(id)) return false;
+  deletingAlertIds.add(id);
+  if (trigger) trigger.disabled = true;
+  const status = document.getElementById('alerts-status');
+  let deleted = false;
   try {
     const res = await fetch(VyntrixConfig.apiUrl(`/api/alerts/${id}`), {
       method: 'DELETE',
@@ -789,10 +864,21 @@ async function deleteAlertItem(id) {
       alertsCache = alertsCache.filter(a => a.id !== id);
       renderAlertList();
       console.log(`Alert log ID ${id} deleted.`);
+      status.textContent = '';
+      status.classList.remove('is-error');
+      deleted = true;
+    } else {
+      throw new Error(`Delete request returned ${res.status}`);
     }
   } catch (err) {
     console.error('Failed to delete alert log:', err);
+    status.textContent = 'This motion event could not be deleted. Try again.';
+    status.classList.add('is-error');
+  } finally {
+    deletingAlertIds.delete(id);
+    if (trigger?.isConnected) trigger.disabled = false;
   }
+  return deleted;
 }
 
 // Initialise on load
@@ -801,4 +887,5 @@ window.addEventListener('beforeunload', () => {
   if (peerConnection) {
     peerConnection.close();
   }
+  micStream?.getTracks().forEach(track => track.stop());
 });

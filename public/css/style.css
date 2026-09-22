@@ -1065,20 +1065,27 @@ main {
 }
 
 .camera-diagnostics {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
   margin-top: 1rem;
-  padding: 1rem;
   border: 1px dashed rgba(61, 214, 198, 0.35);
   border-radius: var(--radius-lg);
   background: rgba(8, 18, 27, 0.82);
 }
 
-.camera-diagnostics h3 {
-  margin: 0.15rem 0 0.25rem;
-  font-size: 1rem;
+.camera-diagnostics > summary {
+  min-height: 44px;
+  padding: 0.75rem 1rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.camera-diagnostics-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1rem 1rem;
 }
 
 .camera-diagnostics-summary {
@@ -1091,7 +1098,7 @@ main {
 }
 
 @media (max-width: 700px) {
-  .camera-diagnostics {
+  .camera-diagnostics-content {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -2246,7 +2253,7 @@ footer {
 
   .camera-settings .settings-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .motion-log-panel .alerts-list {
@@ -2622,6 +2629,128 @@ footer {
   bottom: max(1rem, env(safe-area-inset-bottom));
   min-height: 46px;
   padding-inline: 1rem;
+}
+
+/* V1 product states and interaction polish */
+.connection-banner {
+  width: min(calc(100% - 2rem), 1280px);
+  margin: 0.75rem auto 0;
+  padding: 0.7rem 1rem;
+  border: 1px solid rgba(61, 214, 198, 0.28);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  background: rgba(12, 26, 36, 0.96);
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+.connection-banner-error,
+.inline-service-state.is-error,
+.motion-log-status.is-error {
+  border-color: rgba(255, 98, 92, 0.3);
+  color: #ffaaa6;
+}
+
+.inline-service-state {
+  width: fit-content;
+  margin-top: 0.75rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid rgba(61, 214, 198, 0.22);
+  border-radius: 999px;
+  color: var(--accent-cyan) !important;
+  background: rgba(61, 214, 198, 0.06);
+  font-size: 0.75rem;
+}
+
+.video-state-overlay {
+  position: absolute;
+  z-index: 12;
+  top: 50%;
+  left: 50%;
+  max-width: min(86%, 430px);
+  padding: 0.65rem 0.9rem;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(61, 214, 198, 0.28);
+  border-radius: 10px;
+  color: #e8f5f4;
+  background: rgba(3, 10, 16, 0.86);
+  text-align: center;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+
+.video-state-overlay[hidden] {
+  display: none;
+}
+
+.video-state-overlay.is-error {
+  border-color: rgba(255, 98, 92, 0.38);
+  color: #ffcfcc;
+}
+
+.motion-log-status {
+  min-height: 1.25rem;
+  margin: -0.25rem 0 0.65rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.btn:disabled,
+.ptt-btn:disabled,
+.alert-delete-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.segment-button,
+.camera-action,
+.ptt-btn {
+  min-height: 44px;
+}
+
+.camera-card {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+
+.camera-card:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 3px;
+  border-color: var(--accent-cyan);
+}
+
+@media (max-width: 420px) {
+  .user-badge {
+    max-width: 2.35rem;
+    padding-inline: 0.35rem;
+  }
+
+  .user-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .nav-link {
+    padding-inline: 0.35rem;
+    font-size: 0.72rem;
+  }
+
+  .stream-title-bar {
+    gap: 0.55rem;
+  }
+
+  .stream-title-bar h2 {
+    font-size: 1rem;
+  }
 }
 
 @media (max-width: 390px) {

@@ -41,15 +41,15 @@
           <span class="page-eyebrow">Your camera network</span>
           <h2>Select an active camera</h2>
           <p>Choose a connected device to begin monitoring in real time.</p>
+          <p class="inline-service-state" id="camera-network-state" role="status" aria-live="polite">Connecting to your camera network…</p>
         </div>
         
         <div id="camera-list-container" class="camera-selection-grid">
           <!-- Populated dynamically with active cameras -->
           <div class="camera-empty-state">
             <div class="empty-state-icon" aria-hidden="true">📹</div>
-            <h4>No cameras online</h4>
-            <p>Open Vyntrix on another phone or computer, name the camera, and select <strong>Start Camera</strong>.</p>
-            <a href="/camera.html" target="_blank" class="btn btn-glass">Open Camera Console</a>
+            <h4>Looking for cameras…</h4>
+            <p>Connecting securely to your Vyntrix camera network.</p>
           </div>
         </div>
       </div>
@@ -87,6 +87,7 @@
               <span aria-hidden="true" id="fullscreen-icon">⛶</span>
               <span id="fullscreen-label">Full Screen</span>
             </button>
+            <div class="video-state-overlay" id="monitor-video-state" role="status" aria-live="polite">Connecting to camera…</div>
           </div>
 
           <!-- Dash Control panel -->
@@ -152,7 +153,7 @@
             </div>
 
             <div class="control-card">
-              <button class="ptt-btn" id="btn-ptt" aria-label="Hold to talk to the camera">
+              <button class="ptt-btn" id="btn-ptt" aria-label="Hold to talk to the camera" disabled>
                 <div class="ptt-pulse"></div>
                 <span style="font-size: 1.1rem;">🎤 TALK</span>
                 <span style="font-size: 0.7rem; opacity: 0.8; font-weight: 400;">Hold to talk (Walkie-Talkie)</span>
@@ -167,6 +168,7 @@
             <span>Recent Motion Logs</span>
             <span class="sidebar-count" id="alerts-count">0 logs</span>
           </div>
+          <p class="motion-log-status" id="alerts-status" role="status" aria-live="polite">Loading motion events…</p>
           
           <div class="alerts-list" id="alerts-list">
             <!-- Alert log cards will populate dynamically -->

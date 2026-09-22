@@ -63,6 +63,7 @@
             <div class="overlay-motion-tag" id="motion-warning" style="display: none; background: rgba(255, 59, 48, 0.9); z-index: 10;">
               ⚠️ MOTION DETECTED
             </div>
+            <div class="video-state-overlay" id="camera-operation-message" role="status" aria-live="polite" hidden></div>
           </div>
 
           <div class="controls-grid">
@@ -160,16 +161,18 @@
       </div>
 
       <!-- Local-only camera-selection diagnostics. -->
-      <section class="camera-diagnostics" aria-labelledby="camera-diagnostics-title">
-        <div>
+      <details class="camera-diagnostics">
+        <summary id="camera-diagnostics-title">Camera diagnostics</summary>
+        <div class="camera-diagnostics-content">
+          <div>
           <span class="page-eyebrow">Local camera info</span>
-          <h3 id="camera-diagnostics-title">Camera Diagnostics</h3>
+          </div>
+          <div class="camera-diagnostics-summary" role="status" aria-live="polite">
+            <span>Detected video inputs: <strong id="diagnostic-camera-count">—</strong></span>
+            <span>Selected: <strong id="diagnostic-selected-camera">No active camera</strong></span>
+          </div>
         </div>
-        <div class="camera-diagnostics-summary" role="status" aria-live="polite">
-          <span>Detected video inputs: <strong id="diagnostic-camera-count">—</strong></span>
-          <span>Selected: <strong id="diagnostic-selected-camera">No active camera</strong></span>
-        </div>
-      </section>
+      </details>
     </div>
   </main>
 

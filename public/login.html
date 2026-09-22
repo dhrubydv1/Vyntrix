@@ -55,7 +55,7 @@
           <div class="form-feedback error" id="feedback-error" role="alert" aria-live="assertive"></div>
           <div class="form-feedback success" id="feedback-success" role="status" aria-live="polite"></div>
           
-          <button class="btn btn-primary auth-submit" type="submit">Sign In</button>
+          <button class="btn btn-primary auth-submit" type="submit" id="login-submit">Sign In</button>
         </form>
 
         <div class="auth-footer">
@@ -76,9 +76,13 @@
       const password = document.getElementById('password').value;
       const errEl = document.getElementById('feedback-error');
       const succEl = document.getElementById('feedback-success');
+      const submitButton = document.getElementById('login-submit');
 
       errEl.style.display = 'none';
       succEl.style.display = 'none';
+      submitButton.disabled = true;
+      submitButton.textContent = 'Signing in…';
+      e.currentTarget.setAttribute('aria-busy', 'true');
 
       try {
         const res = await fetch(VyntrixConfig.apiUrl('/api/auth/login'), {
@@ -119,10 +123,16 @@
         } else {
           errEl.innerText = data.error || 'Login failed. Please check credentials.';
           errEl.style.display = 'block';
+          submitButton.disabled = false;
+          submitButton.textContent = 'Sign In';
+          e.currentTarget.removeAttribute('aria-busy');
         }
       } catch (err) {
-        errEl.innerText = 'Network error, please try again.';
+        errEl.innerText = 'Vyntrix could not be reached. Check your connection and try again.';
         errEl.style.display = 'block';
+        submitButton.disabled = false;
+        submitButton.textContent = 'Sign In';
+        e.currentTarget.removeAttribute('aria-busy');
         console.error('Login error:', err);
       }
     });

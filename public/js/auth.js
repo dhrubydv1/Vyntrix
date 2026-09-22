@@ -1,24 +1,66 @@
 // Shared Authentication Manager for Vyntrix
 
-async function checkSession() {
-  try {
-    const res = await fetch(VyntrixConfig.apiUrl('/api/auth/session'), { credentials: 'include' });
-    const data = await res.json();
-    return data;
-  } catch (err) {
-    console.error('Failed to verify session status:', err);
-    return { loggedIn: false };
+let sessionRequest = null;
+
+function setGlobalConnectionState(message = '', state = 'info') {
+  let banner = document.getElementById('global-connection-state');
+  if (!message) {
+    banner?.remove();
+    return;
   }
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'global-connection-state';
+    banner.className = 'connection-banner';
+    document.querySelector('header')?.insertAdjacentElement('afterend', banner);
+  }
+  banner.setAttribute('role', state === 'error' ? 'alert' : 'status');
+  banner.setAttribute('aria-live', state === 'error' ? 'assertive' : 'polite');
+  banner.className = `connection-banner connection-banner-${state}`;
+  banner.textContent = message;
 }
 
-async function updateNavbar() {
-  const session = await checkSession();
+async function requestSession() {
+  const delays = [0, 1200, 2500];
+  for (let attempt = 0; attempt < delays.length; attempt += 1) {
+    if (delays[attempt]) await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+    try {
+      const res = await fetch(VyntrixConfig.apiUrl('/api/auth/session'), { credentials: 'include' });
+      if (!res.ok) throw new Error(`Session request returned ${res.status}`);
+      const data = await res.json();
+      setGlobalConnectionState();
+      return data;
+    } catch (err) {
+      console.error('Failed to verify session status:', err);
+      if (attempt < delays.length - 1) {
+        setGlobalConnectionState('Vyntrix is waking up. Reconnecting securely…');
+      }
+    }
+  }
+  setGlobalConnectionState('Vyntrix is currently unreachable. Check your connection and try again.', 'error');
+  return { loggedIn: false, unavailable: true };
+}
+
+function checkSession({ refresh = false } = {}) {
+  if (refresh || !sessionRequest) sessionRequest = requestSession();
+  return sessionRequest;
+}
+
+async function updateNavbar(options) {
+  const session = await checkSession(options);
   const navActions = document.getElementById('nav-actions');
   const navLinksContainer = document.getElementById('nav-links-container');
   
   if (!navActions || !navLinksContainer) return session;
 
-  if (session.loggedIn) {
+  if (session.unavailable) {
+    navLinksContainer.replaceChildren(createNavLink('link-home', '/', 'Home'));
+    const retry = document.createElement('button');
+    retry.className = 'btn btn-secondary nav-retry';
+    retry.textContent = 'Retry';
+    retry.addEventListener('click', () => updateNavbar({ refresh: true }));
+    navActions.replaceChildren(retry);
+  } else if (session.loggedIn) {
     navLinksContainer.replaceChildren(
       createNavLink('link-home', '/', 'Home'),
       createNavLink('link-monitor', '/monitor.html', 'Web Monitor'),
@@ -90,7 +132,7 @@ async function handleLogout() {
 // Redirect helpers for protected pages
 async function protectPage() {
   const session = await updateNavbar();
-  if (!session.loggedIn) {
+  if (!session.loggedIn && !session.unavailable) {
     window.location.href = `/login.html?redirect=${encodeURIComponent(window.location.pathname)}`;
   }
   return session;

@@ -59,7 +59,7 @@
           <div class="form-feedback error" id="feedback-error" role="alert" aria-live="assertive"></div>
           <div class="form-feedback success" id="feedback-success" role="status" aria-live="polite"></div>
           
-          <button class="btn btn-primary auth-submit" type="submit">Create Account</button>
+          <button class="btn btn-primary auth-submit" type="submit" id="register-submit">Create Account</button>
         </form>
 
         <div class="auth-footer">
@@ -80,6 +80,7 @@
       const confirmPassword = document.getElementById('confirm-password').value;
       const errEl = document.getElementById('feedback-error');
       const succEl = document.getElementById('feedback-success');
+      const submitButton = document.getElementById('register-submit');
 
       errEl.style.display = 'none';
       succEl.style.display = 'none';
@@ -89,6 +90,10 @@
         errEl.style.display = 'block';
         return;
       }
+
+      submitButton.disabled = true;
+      submitButton.textContent = 'Creating account…';
+      e.currentTarget.setAttribute('aria-busy', 'true');
 
       try {
         const res = await fetch(VyntrixConfig.apiUrl('/api/auth/register'), {
@@ -118,10 +123,16 @@
         } else {
           errEl.innerText = data.error || 'Registration failed. Try a different username.';
           errEl.style.display = 'block';
+          submitButton.disabled = false;
+          submitButton.textContent = 'Create Account';
+          e.currentTarget.removeAttribute('aria-busy');
         }
       } catch (err) {
-        errEl.innerText = 'Network error, please try again.';
+        errEl.innerText = 'Vyntrix could not be reached. Check your connection and try again.';
         errEl.style.display = 'block';
+        submitButton.disabled = false;
+        submitButton.textContent = 'Create Account';
+        e.currentTarget.removeAttribute('aria-busy');
         console.error('Registration error:', err);
       }
     });
