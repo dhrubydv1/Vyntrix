@@ -178,11 +178,20 @@ describe('Actual Vyntrix server HTTP integration', () => {
     assert.strictEqual(session.status, 200);
     assert.strictEqual(session.body.loggedIn, true);
     assert.strictEqual(session.body.user.username, username);
+    assert.deepStrictEqual(Object.keys(session.body.user).sort(), ['id', 'username']);
 
-    const logout = await request('POST', '/api/auth/logout', null, registration.cookie);
+    const reauthentication = await request('POST', '/api/auth/login', {
+      username,
+      password: 'testpass123'
+    }, registration.cookie);
+    assert.strictEqual(reauthentication.status, 200);
+    const rotatedCookie = extractCookie(reauthentication.headers);
+    assert.notStrictEqual(rotatedCookie, registration.cookie);
+
+    const logout = await request('POST', '/api/auth/logout', null, rotatedCookie);
     assert.strictEqual(logout.status, 200);
 
-    const loggedOut = await request('GET', '/api/devices/active-cameras', null, registration.cookie);
+    const loggedOut = await request('GET', '/api/devices/active-cameras', null, rotatedCookie);
     assert.strictEqual(loggedOut.status, 401);
 
     const login = await request('POST', '/api/auth/login', {
@@ -199,6 +208,7 @@ describe('Actual Vyntrix server HTTP integration', () => {
     const response = await request('GET', '/api/alerts');
     assert.strictEqual(response.status, 401);
     assert.deepStrictEqual(response.body, { error: 'Unauthorized' });
+    assert.strictEqual(response.headers['x-powered-by'], undefined);
   });
 
   it('serves only the normalized ICE configuration to authenticated clients', async () => {

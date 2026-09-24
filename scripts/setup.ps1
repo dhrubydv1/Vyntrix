@@ -86,7 +86,7 @@ if (Test-Path '.env.local') {
   Write-Warn '.env.local is not present. It is optional for local development, but required values should be set before production.'
   if (Confirm-Action 'Create .env.local from .env.example?') {
     Copy-Item '.env.example' '.env.local'
-    Write-Ok 'Created .env.local. Replace the SESSION_SECRET placeholder before production use.'
+    Write-Ok 'Created .env.local. Set DATABASE_URL and replace the SESSION_SECRET placeholder before production use.'
   }
 }
 

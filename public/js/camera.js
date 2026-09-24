@@ -795,16 +795,6 @@ function connectSocket() {
 }
 
 function createPeerConnection(monitorSocketId, signalingSocket = socket) {
-  console.log('Creating RTCPeerConnection for monitor:', monitorSocketId);
-
-  console.log('LOCAL TRACKS',
-    localStream?.getTracks().map(track => ({
-      kind: track.kind,
-      enabled: track.enabled,
-      readyState: track.readyState
-    }))
-  );
-  
   const pc = new RTCPeerConnection({
     iceServers
   });
@@ -813,14 +803,6 @@ function createPeerConnection(monitorSocketId, signalingSocket = socket) {
   localStream.getTracks().forEach(track => {
     pc.addTrack(track, localStream);
   });
-
-  console.log('SENDERS',
-    pc.getSenders().map(sender => ({
-      kind: sender.track?.kind,
-      enabled: sender.track?.enabled,
-      readyState: sender.track?.readyState
-    }))
-  );
 
   // ICE candidates
   pc.onicecandidate = (event) => {
@@ -853,7 +835,7 @@ function createPeerConnection(monitorSocketId, signalingSocket = socket) {
 
   pc.oniceconnectionstatechange = () => {
     const state = pc.iceConnectionState;
-    console.log(`ICE connection state for ${monitorSocketId}: ${state}`);
+    console.log(`Camera peer connection state: ${state}`);
     if (state === 'disconnected' || state === 'failed' || state === 'closed') {
       cleanPeer(monitorSocketId);
     }
@@ -1113,7 +1095,7 @@ async function triggerMotionAlert() {
     
     const result = await res.json();
     if (res.ok && result.success) {
-      console.log('Motion event successfully saved:', result.alert.id);
+      console.log('Motion event successfully saved.');
     }
   } catch (err) {
     if (err.name !== 'AbortError') {

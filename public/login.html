@@ -99,7 +99,7 @@
           
           // Get redirect URL from query param if present
           const params = new URLSearchParams(window.location.search);
-          const redirect = params.get('redirect');
+          const redirect = safeLocalRedirect(params.get('redirect'));
           
           if (redirect) {
             setTimeout(() => {

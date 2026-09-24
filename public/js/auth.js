@@ -115,6 +115,17 @@ function createNavLink(id, href, label, className = 'nav-link') {
   return link;
 }
 
+function safeLocalRedirect(value) {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return null;
+  try {
+    const target = new URL(value, window.location.origin);
+    if (target.origin !== window.location.origin) return null;
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function handleLogout() {
   try {
     const res = await fetch(VyntrixConfig.apiUrl('/api/auth/logout'), { method: 'POST', credentials: 'include' });

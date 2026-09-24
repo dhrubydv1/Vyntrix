@@ -1,4 +1,7 @@
-if (process.env.VYNTRIX_DATABASE_MODE !== 'json') {
+const useJsonCompatibilityStore = process.env.NODE_ENV !== 'production'
+  && process.env.VYNTRIX_DATABASE_MODE === 'json';
+
+if (!useJsonCompatibilityStore) {
   module.exports = require('./postgres-db');
 } else {
 const fs = require('fs');

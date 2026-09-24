@@ -8,6 +8,8 @@ const projectRoot = path.join(__dirname, '..');
 const configExpression = "process.stdout.write(require('./backend/config').DATA_DIR)";
 const iceExpression = "process.stdout.write(JSON.stringify(require('./backend/config').ICE_SERVERS))";
 const frontendOriginExpression = "process.stdout.write(String(require('./backend/config').FRONTEND_ORIGIN))";
+const databaseModuleExpression = "require('./backend/db'); process.stdout.write('loaded')";
+const serverModuleExpression = "require('./backend/server'); process.stdout.write('loaded')";
 
 function resolveDataDir(extraEnvironment = {}) {
   const environment = { ...process.env };
@@ -71,6 +73,47 @@ describe('Data directory configuration', () => {
       resolveDataDir(),
       path.join(projectRoot, 'data')
     );
+  });
+});
+
+describe('Production database selection', () => {
+  it('does not allow the JSON compatibility store in production', () => {
+    const environment = { ...process.env, NODE_ENV: 'production', VYNTRIX_DATABASE_MODE: 'json' };
+    delete environment.DATABASE_URL;
+    assert.throws(() => execFileSync(process.execPath, ['-e', databaseModuleExpression], {
+      cwd: projectRoot,
+      env: environment,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    }));
+  });
+});
+
+describe('Production runtime safeguards', () => {
+  function loadProductionServer(overrides) {
+    const environment = {
+      ...process.env,
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://test:test@127.0.0.1:5432/test',
+      SESSION_SECRET: 'a-secure-test-session-secret-at-least-32-characters',
+      VYNTRIX_FRONTEND_ORIGIN: 'https://vyntrix.example',
+      ...overrides
+    };
+    return execFileSync(process.execPath, ['-e', serverModuleExpression], {
+      cwd: projectRoot,
+      env: environment,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+  }
+
+  it('rejects short production session secrets', () => {
+    assert.throws(() => loadProductionServer({ SESSION_SECRET: 'too-short' }));
+  });
+
+  it('requires an HTTPS production frontend origin', () => {
+    assert.throws(() => loadProductionServer({ VYNTRIX_FRONTEND_ORIGIN: '' }));
+    assert.throws(() => loadProductionServer({ VYNTRIX_FRONTEND_ORIGIN: 'http://vyntrix.example' }));
   });
 });
 

@@ -17,6 +17,7 @@ const {
 } = require('./config');
 
 const app = express();
+app.disable('x-powered-by');
 const server = http.createServer(app);
 const io = new Server(server, {
   maxHttpBufferSize: 2 * 1024 * 1024,
@@ -25,9 +26,16 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3050;
 const isProduction = process.env.NODE_ENV === 'production';
+const sessionSecret = process.env.SESSION_SECRET || '';
 
-if (isProduction && !process.env.SESSION_SECRET) {
-  throw new Error('SESSION_SECRET must be set when NODE_ENV=production');
+if (isProduction && sessionSecret.length < 32) {
+  throw new Error('SESSION_SECRET must be at least 32 characters when NODE_ENV=production');
+}
+if (isProduction && !FRONTEND_ORIGIN) {
+  throw new Error('VYNTRIX_FRONTEND_ORIGIN must be set when NODE_ENV=production');
+}
+if (isProduction && !FRONTEND_ORIGIN.startsWith('https://')) {
+  throw new Error('VYNTRIX_FRONTEND_ORIGIN must use HTTPS when NODE_ENV=production');
 }
 
 if (isProduction) app.set('trust proxy', 1);
@@ -51,7 +59,7 @@ const sessionStore = useFileSessionStore
     });
 
 const sessionMiddleware = session({
-  secret: process.env.SESSION_SECRET || 'development-only-change-this-secret',
+  secret: sessionSecret || 'development-only-change-this-secret',
   name: 'sasta_cctv_session',
   store: sessionStore,
   resave: false,
@@ -132,6 +140,16 @@ io.use((socket, next) => {
 });
 
 // Authentication APIs
+function establishAuthenticatedSession(req, user) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((regenerateError) => {
+      if (regenerateError) return reject(regenerateError);
+      req.session.user = user;
+      req.session.save((saveError) => (saveError ? reject(saveError) : resolve()));
+    });
+  });
+}
+
 app.post('/api/auth/register', async (req, res) => {
   const { username, password } = req.body;
   if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
@@ -146,11 +164,14 @@ app.post('/api/auth/register', async (req, res) => {
 
   try {
     const user = await db.createUser(username, password);
-    req.session.user = user;
+    await establishAuthenticatedSession(req, user);
     return res.json({ success: true, user });
   } catch (err) {
     console.error('Registration error:', err);
-    return res.status(400).json({ error: err.message });
+    if (err.message === 'Username already exists') {
+      return res.status(400).json({ error: err.message });
+    }
+    return res.status(500).json({ error: 'Registration could not be completed. Please try again.' });
   }
 });
 
@@ -165,7 +186,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
-    req.session.user = user;
+    await establishAuthenticatedSession(req, user);
     return res.json({ success: true, user });
   } catch (err) {
     console.error('Login error:', err);
@@ -246,7 +267,11 @@ app.post('/api/alerts/upload', requireAuth, alertUploadLimiter, async (req, res)
     if (err.code === 'STORAGE_WRITE_FAILED') {
       return res.status(500).json({ error: 'Alert could not be saved. Please try again.' });
     }
-    return res.status(400).json({ error: err.message || 'Failed to upload alert' });
+    if (['Image content is required', 'Only JPEG, PNG, and WebP image uploads are supported']
+      .includes(err.message) || /^Image must be between 1 byte and /.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    return res.status(500).json({ error: 'Alert could not be saved. Please try again.' });
   }
 });
 
@@ -312,12 +337,12 @@ io.on('connection', (socket) => {
         cameraName: socket.cameraName,
         socketId: socket.id
       };
-      console.log(`Camera registered: "${socket.cameraName}" (User ID: ${finalUserId}, Socket ID: ${socket.id})`);
+      console.log('Camera registered.');
       
       // Notify monitors in the room
       io.to(userRoom).emit('camera-list-update', getCamerasForUser(finalUserId));
     } else if (type === 'monitor') {
-      console.log(`Monitor registered: (User ID: ${finalUserId}, Socket ID: ${socket.id})`);
+      console.log('Monitor registered.');
       
       // Send active cameras list to the newly connected monitor
       socket.emit('camera-list-update', getCamerasForUser(finalUserId));
@@ -344,7 +369,7 @@ io.on('connection', (socket) => {
 
     const targetSocket = io.sockets.sockets.get(targetSocketId);
     if (targetSocket && targetSocket.userId === socket.userId && targetSocket.deviceType === 'camera') {
-      console.log(`Triggering siren on camera ${targetSocketId}: ${action}`);
+      console.log(`Siren command accepted: ${action}.`);
       targetSocket.emit('trigger-siren', { action });
     }
   });
@@ -386,14 +411,14 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (socket.deviceType === 'camera') {
       delete activeCameras[socket.id];
-      console.log(`Camera disconnected: "${socket.cameraName}" (Socket ID: ${socket.id})`);
+      console.log('Camera disconnected.');
       
       if (socket.userId) {
         const userRoom = `user_${socket.userId}`;
         io.to(userRoom).emit('camera-list-update', getCamerasForUser(socket.userId));
       }
     } else if (socket.deviceType === 'monitor') {
-      console.log(`Monitor disconnected: (Socket ID: ${socket.id})`);
+      console.log('Monitor disconnected.');
     }
   });
 });

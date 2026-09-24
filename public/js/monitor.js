@@ -946,7 +946,7 @@ async function deleteAlertItem(id, trigger = null) {
     if (res.ok) {
       alertsCache = alertsCache.filter(a => a.id !== id);
       renderAlertList();
-      console.log(`Alert log ID ${id} deleted.`);
+      console.log('Motion event deleted.');
       status.textContent = '';
       status.classList.remove('is-error');
       deleted = true;

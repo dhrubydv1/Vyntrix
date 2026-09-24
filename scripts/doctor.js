@@ -158,7 +158,7 @@ if (fs.existsSync(envPath)) {
 }
 
 if (effectiveEnv.NODE_ENV === 'production') {
-  if (hasConfiguredValue(effectiveEnv.SESSION_SECRET)) {
+  if (hasConfiguredValue(effectiveEnv.SESSION_SECRET) && effectiveEnv.SESSION_SECRET.length >= 32) {
     ok('SESSION_SECRET is configured for production.');
   } else {
     fail('SESSION_SECRET is required when NODE_ENV=production. Set a unique random value of at least 32 characters.');
@@ -167,6 +167,20 @@ if (effectiveEnv.NODE_ENV === 'production') {
   ok('SESSION_SECRET is configured for local development.');
 } else {
   warn('SESSION_SECRET is using the local development fallback. Set it before production deployment.');
+}
+
+if (effectiveEnv.NODE_ENV === 'production') {
+  try {
+    const configuredFrontendOrigin = (effectiveEnv.VYNTRIX_FRONTEND_ORIGIN || '').trim().replace(/\/$/, '');
+    const frontendOrigin = new URL(configuredFrontendOrigin);
+    if (frontendOrigin.protocol === 'https:' && frontendOrigin.origin === configuredFrontendOrigin) {
+      ok('VYNTRIX_FRONTEND_ORIGIN is a production HTTPS origin.');
+    } else {
+      fail('VYNTRIX_FRONTEND_ORIGIN must be an HTTPS origin without a path in production.');
+    }
+  } catch (_) {
+    fail('VYNTRIX_FRONTEND_ORIGIN must be configured as an HTTPS origin in production.');
+  }
 }
 
 if (effectiveEnv.PORT) {
@@ -225,23 +239,25 @@ if (fs.existsSync(dataDirectory)) {
     ok('PostgreSQL session storage is enabled; the local session directory is not used.');
   }
 
-  const databasePath = path.join(dataDirectory, 'database.json');
-  const temporaryDatabasePath = `${databasePath}.tmp`;
-  if (fs.existsSync(temporaryDatabasePath)) {
-    warn(`Stale database temporary file found; inspect before starting: ${temporaryDatabasePath}`);
-  }
-  if (!fs.existsSync(databasePath)) {
-    warn(`database.json is missing and will be initialized on startup: ${databasePath}`);
-  } else {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(databasePath, 'utf8'));
-      if (validateDatabaseShape(parsed)) {
-        ok('database.json is valid and has the required users and alerts collections.');
-      } else {
-        fail('database.json has an invalid structure; no data was modified.');
+  if (usesJsonCompatibilityMode) {
+    const databasePath = path.join(dataDirectory, 'database.json');
+    const temporaryDatabasePath = `${databasePath}.tmp`;
+    if (fs.existsSync(temporaryDatabasePath)) {
+      warn(`Stale database temporary file found; inspect before starting: ${temporaryDatabasePath}`);
+    }
+    if (!fs.existsSync(databasePath)) {
+      warn(`database.json is missing and will be initialized on startup: ${databasePath}`);
+    } else {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(databasePath, 'utf8'));
+        if (validateDatabaseShape(parsed)) {
+          ok('database.json is valid and has the required users and alerts collections.');
+        } else {
+          fail('database.json has an invalid structure; no data was modified.');
+        }
+      } catch (_) {
+        fail('database.json is malformed; no data was modified.');
       }
-    } catch (_) {
-      fail('database.json is malformed; no data was modified.');
     }
   }
 }

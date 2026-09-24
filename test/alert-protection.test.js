@@ -137,4 +137,21 @@ describe('Alert upload protection', () => {
       db.addAlert = originalAddAlert;
     }
   });
+
+  it('does not expose unexpected persistence errors to clients', async () => {
+    const cookie = await register(`unexpected_${Date.now()}`);
+    const originalAddAlert = db.addAlert;
+    db.addAlert = () => {
+      throw new Error('private database host detail');
+    };
+
+    try {
+      const response = await upload(cookie);
+      assert.strictEqual(response.status, 500);
+      assert.deepStrictEqual(response.body, { error: 'Alert could not be saved. Please try again.' });
+      assert.ok(!JSON.stringify(response.body).includes('private database host detail'));
+    } finally {
+      db.addAlert = originalAddAlert;
+    }
+  });
 });

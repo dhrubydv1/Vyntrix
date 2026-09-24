@@ -117,7 +117,7 @@ else
   warn '.env.local is not present. It is optional for local development, but required values should be set before production.'
   if ask 'Create .env.local from .env.example?'; then
     cp .env.example .env.local
-    ok 'Created .env.local. Replace the SESSION_SECRET placeholder before production use.'
+    ok 'Created .env.local. Set DATABASE_URL and replace the SESSION_SECRET placeholder before production use.'
   fi
 fi
 
