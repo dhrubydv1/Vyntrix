@@ -1064,6 +1064,51 @@ main {
   color: #ffaaa6;
 }
 
+.recording-timer {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.recording-state-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.5rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.recording-state-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.recording-card.is-recording .recording-state-dot {
+  background: var(--accent-alert);
+  box-shadow: 0 0 8px var(--accent-alert);
+  animation: pulse-red 1s infinite;
+}
+
+.recording-card.is-uploading .recording-state-dot {
+  background: var(--accent-cyan);
+  box-shadow: 0 0 8px var(--accent-cyan);
+}
+
+.recording-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.recording-actions .btn {
+  width: 100%;
+  min-height: 42px;
+}
+
 .camera-diagnostics {
   margin-top: 1rem;
   border: 1px dashed rgba(61, 214, 198, 0.35);

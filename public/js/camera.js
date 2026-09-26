@@ -10,6 +10,19 @@ let activeFacingMode = 'environment';
 let cameraSwitchInProgress = false;
 let cameraStartInProgress = false;
 let videoInputDevices = [];
+let cameraStopInProgress = false;
+
+// Manual recording uses the active stream without replacing or cloning tracks.
+let mediaRecorder = null;
+let recordingChunks = [];
+let recordingStartedAt = null;
+let recordingStartedMonotonic = 0;
+let recordingTimerId = null;
+let recordingPhase = 'idle';
+let recordingStopPromise = null;
+let resolveRecordingStop = null;
+let recordingFinalizedPromise = null;
+let resolveRecordingFinalized = null;
 
 const deviceFacingHints = new Map();
 
@@ -79,6 +92,8 @@ async function init() {
 function setupDOMListeners() {
   document.getElementById('btn-start').addEventListener('click', startCamera);
   document.getElementById('btn-stop').addEventListener('click', stopCamera);
+  document.getElementById('btn-start-recording').addEventListener('click', startRecording);
+  document.getElementById('btn-stop-recording').addEventListener('click', stopRecording);
   document.getElementById('btn-kill-siren').addEventListener('click', stopSiren);
   
   // Motion settings update
@@ -91,6 +106,7 @@ function setupDOMListeners() {
   updateFacingControls(activeFacingMode);
   mirrorToggle.checked = readBooleanPreference(CAMERA_MIRROR_STORAGE_KEY);
   applyLocalMirror(mirrorToggle.checked);
+  updateRecordingControls();
 
   document.querySelectorAll('[data-facing-mode]').forEach((button) => {
     button.addEventListener('click', async () => {
@@ -163,7 +179,7 @@ function facingLabel(facingMode) {
 function updateFacingControls(facingMode, disabled = false) {
   document.querySelectorAll('[data-facing-mode]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.facingMode === facingMode));
-    button.disabled = disabled;
+    button.disabled = disabled || recordingIsActive();
   });
 }
 
@@ -271,6 +287,194 @@ function setupTimeCounter() {
     const el = document.getElementById('stream-time');
     if (el) el.innerText = timeStr;
   }, 1000);
+}
+
+function recordingIsActive() {
+  return Boolean(mediaRecorder && mediaRecorder.state !== 'inactive');
+}
+
+function supportedRecordingMimeType() {
+  if (!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== 'function') return null;
+  const candidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+    'video/mp4'
+  ];
+  return candidates.find(type => MediaRecorder.isTypeSupported(type)) || null;
+}
+
+function formatRecordingElapsed(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const base = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  return hours ? `${String(hours).padStart(2, '0')}:${base}` : base;
+}
+
+function updateRecordingTimer() {
+  const elapsed = document.getElementById('recording-elapsed');
+  if (!elapsed || !recordingStartedMonotonic) return;
+  const totalSeconds = Math.max(0, Math.floor((performance.now() - recordingStartedMonotonic) / 1000));
+  elapsed.textContent = formatRecordingElapsed(totalSeconds);
+  elapsed.dateTime = `PT${totalSeconds}S`;
+}
+
+function stopRecordingTimer() {
+  if (recordingTimerId) {
+    clearInterval(recordingTimerId);
+    recordingTimerId = null;
+  }
+}
+
+function updateRecordingControls(message = '', isError = false) {
+  const card = document.querySelector('.recording-card');
+  const state = document.getElementById('recording-state');
+  const feedback = document.getElementById('recording-feedback');
+  const startButton = document.getElementById('btn-start-recording');
+  const stopButton = document.getElementById('btn-stop-recording');
+  if (!card || !state || !feedback || !startButton || !stopButton) return;
+
+  const recordingSupported = Boolean(supportedRecordingMimeType());
+  card.classList.toggle('is-recording', recordingPhase === 'recording');
+  card.classList.toggle('is-uploading', recordingPhase === 'uploading');
+  startButton.hidden = recordingPhase !== 'idle';
+  stopButton.hidden = recordingPhase === 'idle';
+  startButton.disabled = !isStreaming || !recordingSupported || cameraSwitchInProgress || cameraStopInProgress;
+  stopButton.disabled = recordingPhase !== 'recording';
+  stopButton.textContent = recordingPhase === 'recording' ? 'Stop Recording' : 'Saving…';
+  state.textContent = recordingPhase === 'recording'
+    ? 'Recording in progress'
+    : recordingPhase === 'uploading'
+      ? 'Uploading securely…'
+      : !recordingSupported
+        ? 'Recording is unavailable in this browser'
+        : isStreaming
+          ? 'Ready to record'
+          : 'Start the camera to record';
+  feedback.textContent = message;
+  feedback.classList.toggle('is-error', isError);
+}
+
+async function startRecording() {
+  if (!isStreaming || !localStream || recordingPhase !== 'idle' || cameraSwitchInProgress) return;
+  const mimeType = supportedRecordingMimeType();
+  if (!mimeType) {
+    updateRecordingControls('This browser does not support WebM or MP4 recording.', true);
+    return;
+  }
+
+  try {
+    recordingChunks = [];
+    recordingStartedAt = new Date();
+    recordingStartedMonotonic = performance.now();
+    const recorder = new MediaRecorder(localStream, { mimeType });
+    mediaRecorder = recorder;
+    recordingStopPromise = new Promise(resolve => { resolveRecordingStop = resolve; });
+    recordingFinalizedPromise = new Promise(resolve => { resolveRecordingFinalized = resolve; });
+
+    recorder.addEventListener('dataavailable', (event) => {
+      if (event.data?.size) recordingChunks.push(event.data);
+    });
+    recorder.addEventListener('error', () => {
+      updateRecordingControls('Recording stopped because the browser reported a media error.', true);
+      if (recorder.state !== 'inactive') recorder.stop();
+    });
+    recorder.addEventListener('stop', () => {
+      void finalizeRecording(recorder, mimeType);
+    }, { once: true });
+
+    recorder.start(1000);
+    recordingPhase = 'recording';
+    updateRecordingTimer();
+    recordingTimerId = setInterval(updateRecordingTimer, 1000);
+    updateFacingControls(activeFacingMode);
+    updateRecordingControls();
+  } catch (error) {
+    console.error('Could not start manual recording:', error?.name || 'Error');
+    mediaRecorder = null;
+    recordingChunks = [];
+    recordingStartedAt = null;
+    recordingStartedMonotonic = 0;
+    recordingStopPromise = null;
+    resolveRecordingStop = null;
+    recordingFinalizedPromise = null;
+    resolveRecordingFinalized = null;
+    updateRecordingControls('Recording could not start on this device.', true);
+  }
+}
+
+function stopRecording() {
+  if (!mediaRecorder) return recordingStopPromise || Promise.resolve();
+  if (mediaRecorder.state !== 'inactive') {
+    recordingPhase = 'uploading';
+    stopRecordingTimer();
+    updateRecordingControls();
+    mediaRecorder.stop();
+  }
+  return recordingStopPromise || Promise.resolve();
+}
+
+async function finalizeRecording(recorder, selectedMimeType) {
+  const endedAt = new Date();
+  const durationSeconds = Math.max(
+    0,
+    Math.round((performance.now() - recordingStartedMonotonic) / 1000)
+  );
+  const contentType = recorder.mimeType || selectedMimeType;
+  const blob = new Blob(recordingChunks, { type: contentType });
+  resolveRecordingFinalized?.();
+  resolveRecordingFinalized = null;
+  recordingPhase = 'uploading';
+  stopRecordingTimer();
+  updateRecordingControls();
+
+  try {
+    if (!blob.size) throw new Error('The browser produced an empty recording.');
+    const normalizedType = contentType.split(';', 1)[0].toLowerCase();
+    const extension = normalizedType === 'video/mp4' ? 'mp4' : 'webm';
+    const formData = new FormData();
+    formData.append('recording', blob, `recording.${extension}`);
+    formData.append('cameraName', cameraName);
+    formData.append('startedAt', recordingStartedAt.toISOString());
+    formData.append('endedAt', endedAt.toISOString());
+    formData.append('durationSeconds', String(durationSeconds));
+
+    const response = await fetch(VyntrixConfig.apiUrl('/api/recordings'), {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Recording upload failed.');
+    }
+    updateRecordingControls('Recording saved securely.');
+  } catch (error) {
+    console.error('Could not save manual recording:', error?.name || 'Error');
+    updateRecordingControls(
+      error?.message === 'Recording is larger than the upload limit.'
+        ? error.message
+        : 'Recording could not be saved. Check your connection and try a shorter clip.',
+      true
+    );
+  } finally {
+    mediaRecorder = null;
+    recordingChunks = [];
+    recordingStartedAt = null;
+    recordingStartedMonotonic = 0;
+    recordingPhase = 'idle';
+    const finish = resolveRecordingStop;
+    resolveRecordingStop = null;
+    recordingStopPromise = null;
+    recordingFinalizedPromise = null;
+    updateFacingControls(activeFacingMode, cameraSwitchInProgress);
+    updateRecordingControls(
+      document.getElementById('recording-feedback')?.textContent || '',
+      document.getElementById('recording-feedback')?.classList.contains('is-error') || false
+    );
+    finish?.();
+  }
 }
 
 // Siren sound synthesis using Web Audio API
@@ -408,6 +612,7 @@ async function startCamera() {
     isStreaming = true;
     updateCameraStatus('streaming');
     showCameraOperationMessage();
+    updateRecordingControls();
 
     iceServers = await getIceServers();
     if (!isStreaming) return;
@@ -558,6 +763,11 @@ async function switchCamera(facingMode) {
   if (cameraSwitchInProgress) {
     return { success: false, message: 'A camera switch is already in progress.' };
   }
+  if (recordingIsActive()) {
+    const message = 'Stop the current recording before switching cameras.';
+    showCameraSwitchStatus(message, true);
+    return { success: false, message };
+  }
   if (activeFacingMode === facingMode) {
     updateFacingControls(facingMode);
     return { success: true, facingMode, message: `${facingLabel(facingMode)} camera is already active.` };
@@ -565,6 +775,7 @@ async function switchCamera(facingMode) {
 
   cameraSwitchInProgress = true;
   updateFacingControls(activeFacingMode, true);
+  updateRecordingControls();
   showCameraSwitchStatus(`Switching to ${facingLabel(facingMode).toLowerCase()} camera…`);
   updateCameraStatus('switching');
 
@@ -633,11 +844,24 @@ async function switchCamera(facingMode) {
   } finally {
     cameraSwitchInProgress = false;
     updateFacingControls(activeFacingMode);
+    updateRecordingControls();
     if (isStreaming) updateCameraStatus('streaming');
   }
 }
 
-function stopCamera() {
+async function stopCamera() {
+  if (cameraStopInProgress) return recordingFinalizedPromise;
+  cameraStopInProgress = true;
+  const stopButton = document.getElementById('btn-stop');
+  if (stopButton) stopButton.disabled = true;
+  updateRecordingControls();
+
+  // Finalize the Blob while tracks are available, then allow camera shutdown;
+  // the authenticated upload can finish without keeping capture hardware open.
+  const finalizedPromise = recordingFinalizedPromise;
+  void stopRecording();
+  if (finalizedPromise) await finalizedPromise;
+
   // Stop media tracks
   if (localStream) {
     localStream.getTracks().forEach(track => {
@@ -677,7 +901,10 @@ function stopCamera() {
   isStreaming = false;
   cameraStartInProgress = false;
   cameraSwitchInProgress = false;
+  cameraStopInProgress = false;
+  if (stopButton) stopButton.disabled = false;
   updateFacingControls(activeFacingMode);
+  updateRecordingControls();
   showCameraSwitchStatus();
   showCameraOperationMessage();
   updateCameraStatus('offline');

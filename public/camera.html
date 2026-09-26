@@ -102,6 +102,22 @@
               <p class="control-feedback" id="camera-switch-status" role="status" aria-live="polite"></p>
             </div>
 
+            <div class="control-card recording-card">
+              <div class="control-header">
+                <span>Manual Recording</span>
+                <time class="recording-timer" id="recording-elapsed" datetime="PT0S">00:00</time>
+              </div>
+              <div class="recording-state-row">
+                <span class="recording-state-dot" id="recording-state-dot" aria-hidden="true"></span>
+                <span id="recording-state" role="status" aria-live="polite">Start the camera to record</span>
+              </div>
+              <div class="recording-actions">
+                <button type="button" class="btn btn-primary" id="btn-start-recording" disabled>Start Recording</button>
+                <button type="button" class="btn btn-danger" id="btn-stop-recording" hidden>Stop Recording</button>
+              </div>
+              <p class="control-feedback" id="recording-feedback" role="status" aria-live="polite"></p>
+            </div>
+
             <div class="control-card">
               <div class="switch-container">
                 <div>

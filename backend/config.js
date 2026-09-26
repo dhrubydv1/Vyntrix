@@ -90,6 +90,11 @@ const ALERT_UPLOAD_WINDOW_MS = readPositiveInteger(
   15 * 60 * 1000,
   24 * 60 * 60 * 1000
 );
+const MAX_RECORDING_UPLOAD_BYTES = readPositiveInteger(
+  'VYNTRIX_RECORDING_MAX_BYTES',
+  50 * 1024 * 1024,
+  500 * 1024 * 1024
+);
 
 module.exports = {
   DATA_DIR,
@@ -97,6 +102,7 @@ module.exports = {
   MAX_ALERTS_PER_USER,
   ALERT_UPLOAD_LIMIT,
   ALERT_UPLOAD_WINDOW_MS,
+  MAX_RECORDING_UPLOAD_BYTES,
   ICE_SERVERS,
   FRONTEND_ORIGIN
 };

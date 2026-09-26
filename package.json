@@ -17,12 +17,14 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1140.0",
     "bcryptjs": "^3.0.3",
     "connect-pg-simple": "^10.0.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "express-session": "^1.19.0",
+    "multer": "^2.4.0",
     "pg": "^8.23.0",
     "session-file-store": "^1.5.0",
     "socket.io": "^4.8.3"

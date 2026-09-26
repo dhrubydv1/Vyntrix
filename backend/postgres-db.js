@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const bcrypt = require('bcryptjs');
 const {
   DATA_DIR,
@@ -57,6 +58,39 @@ function mapAlert(row) {
     ...(row.image_file ? { imageFile: row.image_file } : {}),
     ...(row.image_path ? { imagePath: row.image_path } : {})
   };
+}
+
+function mapRecording(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    cameraName: row.camera_name,
+    objectKey: row.object_key,
+    contentType: row.content_type,
+    sizeBytes: Number(row.size_bytes),
+    durationSeconds: row.duration_seconds === null ? null : Number(row.duration_seconds),
+    startedAt: new Date(row.started_at).toISOString(),
+    endedAt: row.ended_at === null ? null : new Date(row.ended_at).toISOString(),
+    status: row.status,
+    createdAt: new Date(row.created_at).toISOString()
+  };
+}
+
+function requiredRecordingText(value, label, maximumLength) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${label} is required`);
+  }
+  const normalized = value.trim();
+  if (normalized.length > maximumLength) throw new Error(`${label} is too long`);
+  return normalized;
+}
+
+function recordingDate(value, label, nullable = false) {
+  if (nullable && (value === null || value === undefined)) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(`${label} must be a valid date`);
+  return date;
 }
 
 function validateCredentials(username, password) {
@@ -253,6 +287,93 @@ async function deleteAlert(userId, alertId) {
   return true;
 }
 
+async function createRecording({
+  userId,
+  cameraName,
+  objectKey,
+  contentType,
+  sizeBytes,
+  durationSeconds = null,
+  startedAt,
+  endedAt = null,
+  status = 'uploaded'
+} = {}) {
+  const normalizedUserId = requiredRecordingText(userId, 'Recording owner', 255);
+  const normalizedCameraName = requiredRecordingText(cameraName, 'Camera name', 255);
+  const normalizedObjectKey = requiredRecordingText(objectKey, 'Object key', 1024);
+  const normalizedContentType = requiredRecordingText(contentType, 'Content type', 255);
+  const normalizedStatus = requiredRecordingText(status, 'Recording status', 64);
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) {
+    throw new Error('Recording size must be a non-negative safe integer');
+  }
+  if (durationSeconds !== null
+    && (!Number.isInteger(durationSeconds) || durationSeconds < 0)) {
+    throw new Error('Recording duration must be a non-negative integer or null');
+  }
+
+  const normalizedStartedAt = recordingDate(startedAt, 'Recording start time');
+  const normalizedEndedAt = recordingDate(endedAt, 'Recording end time', true);
+  if (normalizedEndedAt && normalizedEndedAt < normalizedStartedAt) {
+    throw new Error('Recording end time cannot be before its start time');
+  }
+
+  const result = await pool.query(
+    `INSERT INTO recordings
+      (id, user_id, camera_name, object_key, content_type, size_bytes,
+       duration_seconds, started_at, ended_at, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING id, user_id, camera_name, object_key, content_type, size_bytes,
+       duration_seconds, started_at, ended_at, status, created_at`,
+    [
+      crypto.randomUUID(),
+      normalizedUserId,
+      normalizedCameraName,
+      normalizedObjectKey,
+      normalizedContentType,
+      sizeBytes,
+      durationSeconds,
+      normalizedStartedAt,
+      normalizedEndedAt,
+      normalizedStatus
+    ]
+  );
+  return mapRecording(result.rows[0]);
+}
+
+async function listRecordingsForUser(userId) {
+  const result = await pool.query(
+    `SELECT id, user_id, camera_name, object_key, content_type, size_bytes,
+       duration_seconds, started_at, ended_at, status, created_at
+     FROM recordings
+     WHERE user_id = $1
+     ORDER BY started_at DESC, created_at DESC, id DESC`,
+    [userId]
+  );
+  return result.rows.map(mapRecording);
+}
+
+async function getRecordingForUser(userId, recordingId) {
+  const result = await pool.query(
+    `SELECT id, user_id, camera_name, object_key, content_type, size_bytes,
+       duration_seconds, started_at, ended_at, status, created_at
+     FROM recordings
+     WHERE user_id = $1 AND id = $2`,
+    [userId, recordingId]
+  );
+  return mapRecording(result.rows[0]);
+}
+
+async function deleteRecordingForUser(userId, recordingId) {
+  const result = await pool.query(
+    `DELETE FROM recordings
+     WHERE user_id = $1 AND id = $2
+     RETURNING id, user_id, camera_name, object_key, content_type, size_bytes,
+       duration_seconds, started_at, ended_at, status, created_at`,
+    [userId, recordingId]
+  );
+  return mapRecording(result.rows[0]);
+}
+
 init();
 
 module.exports = {
@@ -262,5 +383,9 @@ module.exports = {
   addAlert,
   getAlertsForUser,
   getAlertFilePath,
-  deleteAlert
+  deleteAlert,
+  createRecording,
+  listRecordingsForUser,
+  getRecordingForUser,
+  deleteRecordingForUser
 };

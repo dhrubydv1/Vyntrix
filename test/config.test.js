@@ -8,6 +8,7 @@ const projectRoot = path.join(__dirname, '..');
 const configExpression = "process.stdout.write(require('./backend/config').DATA_DIR)";
 const iceExpression = "process.stdout.write(JSON.stringify(require('./backend/config').ICE_SERVERS))";
 const frontendOriginExpression = "process.stdout.write(String(require('./backend/config').FRONTEND_ORIGIN))";
+const recordingLimitExpression = "process.stdout.write(String(require('./backend/config').MAX_RECORDING_UPLOAD_BYTES))";
 const databaseModuleExpression = "require('./backend/db'); process.stdout.write('loaded')";
 const serverModuleExpression = "require('./backend/server'); process.stdout.write('loaded')";
 
@@ -50,6 +51,17 @@ function resolveFrontendOrigin(extraEnvironment = {}) {
   });
 }
 
+function resolveRecordingLimit(extraEnvironment = {}) {
+  const environment = { ...process.env };
+  delete environment.VYNTRIX_RECORDING_MAX_BYTES;
+  Object.assign(environment, extraEnvironment);
+  return Number(execFileSync(process.execPath, ['-e', recordingLimitExpression], {
+    cwd: projectRoot,
+    env: environment,
+    encoding: 'utf8'
+  }));
+}
+
 describe('Data directory configuration', () => {
   it('prefers VYNTRIX_DATA_DIR when both variables are set', () => {
     assert.strictEqual(
@@ -86,6 +98,18 @@ describe('Production database selection', () => {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe']
     }));
+  });
+});
+
+describe('Recording upload configuration', () => {
+  it('uses a 50 MB default and accepts a bounded override', () => {
+    assert.strictEqual(resolveRecordingLimit(), 50 * 1024 * 1024);
+    assert.strictEqual(resolveRecordingLimit({ VYNTRIX_RECORDING_MAX_BYTES: '1048576' }), 1048576);
+  });
+
+  it('rejects invalid and excessive recording limits', () => {
+    assert.throws(() => resolveRecordingLimit({ VYNTRIX_RECORDING_MAX_BYTES: '0' }));
+    assert.throws(() => resolveRecordingLimit({ VYNTRIX_RECORDING_MAX_BYTES: '524288001' }));
   });
 });
 

@@ -8,10 +8,12 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env.local') });
 
 const db = require('./db');
+const { createRecordingsRouter } = require('./recordings-api');
 const {
   DATA_DIR,
   ALERT_UPLOAD_LIMIT,
   ALERT_UPLOAD_WINDOW_MS,
+  MAX_RECORDING_UPLOAD_BYTES,
   ICE_SERVERS,
   FRONTEND_ORIGIN
 } = require('./config');
@@ -290,6 +292,14 @@ app.delete('/api/alerts/:id', requireAuth, async (req, res) => {
   }
   return res.status(404).json({ error: 'Alert not found or unauthorized' });
 });
+
+// Recording metadata is private to the authenticated owner. R2 remains a
+// server-only dependency and is loaded only for upload or deletion operations.
+app.use('/api/recordings', requireAuth, createRecordingsRouter({
+  db,
+  loadStorage: () => require('./storage/r2-storage'),
+  maxUploadBytes: MAX_RECORDING_UPLOAD_BYTES
+}));
 
 // Real-time Socket.io Communications
 const activeCameras = {}; // socket.id -> { userId, cameraName, socketId }
