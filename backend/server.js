@@ -303,7 +303,8 @@ app.use('/api/recordings', requireAuth, createRecordingsRouter({
 }));
 
 // Real-time Socket.io Communications
-const activeCameras = {}; // socket.id -> { userId, cameraName, socketId }
+const activeCameras = {}; // socket.id -> camera registration and recording state
+const RECORDING_STATES = new Set(['idle', 'recording', 'uploading', 'uploaded', 'error']);
 
 const toAlertResponse = (alert) => ({
   id: alert.id,
@@ -317,8 +318,20 @@ const toAlertResponse = (alert) => ({
 const getCamerasForUser = (userId) => {
   return Object.values(activeCameras)
     .filter(cam => cam.userId === userId)
-    .map(cam => ({ socketId: cam.socketId, cameraName: cam.cameraName }));
+    .map(cam => ({
+      socketId: cam.socketId,
+      cameraName: cam.cameraName,
+      recordingState: cam.recordingState,
+      recordingStartedAt: cam.recordingStartedAt
+    }));
 };
+
+const publicRecordingState = (camera, message = '') => ({
+  cameraSocketId: camera.socketId,
+  state: camera.recordingState,
+  startedAt: camera.recordingStartedAt,
+  message: typeof message === 'string' ? message.slice(0, 160) : ''
+});
 
 io.on('connection', (socket) => {
   const sessionUser = socket.request.session ? socket.request.session.user : null;
@@ -346,7 +359,10 @@ io.on('connection', (socket) => {
       activeCameras[socket.id] = {
         userId: finalUserId,
         cameraName: socket.cameraName,
-        socketId: socket.id
+        socketId: socket.id,
+        recordingState: 'idle',
+        recordingStartedAt: null,
+        recordingCommandPending: null
       };
       console.log('Camera registered.');
       
@@ -406,6 +422,10 @@ io.on('connection', (socket) => {
       reply({ success: false, message: 'That camera is unavailable.' });
       return;
     }
+    if (camera.recordingState === 'recording' || camera.recordingState === 'uploading') {
+      reply({ success: false, message: 'Stop the current recording before switching cameras.' });
+      return;
+    }
 
     targetSocket.timeout(10000).emit('camera:switch', { facingMode }, (error, result) => {
       if (error) {
@@ -418,9 +438,114 @@ io.on('connection', (socket) => {
     });
   });
 
+  // Recording remains entirely camera-side. This channel only forwards an
+  // owner-authorized command and tracks non-sensitive state for monitor sync.
+  socket.on('recording:control', ({ targetSocketId, action } = {}, acknowledge) => {
+    const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
+    if (!socket.userId || socket.deviceType !== 'monitor') {
+      reply({ success: false, state: 'error', message: 'Only an authenticated monitor can control recording.' });
+      return;
+    }
+    if (!targetSocketId || !['start', 'stop'].includes(action)) {
+      reply({ success: false, state: 'error', message: 'Choose Start or Stop recording.' });
+      return;
+    }
+
+    const camera = activeCameras[targetSocketId];
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (!camera || camera.userId !== socket.userId || !targetSocket
+      || targetSocket.userId !== socket.userId || targetSocket.deviceType !== 'camera') {
+      reply({ success: false, state: 'error', message: 'That camera is unavailable.' });
+      return;
+    }
+    if (camera.recordingCommandPending) {
+      reply({
+        success: false,
+        ...publicRecordingState(camera, 'A recording command is already in progress.')
+      });
+      return;
+    }
+    if (action === 'start' && ['recording', 'uploading'].includes(camera.recordingState)) {
+      reply({
+        success: false,
+        ...publicRecordingState(camera, camera.recordingState === 'recording'
+          ? 'Recording is already active.'
+          : 'The previous recording is still uploading.')
+      });
+      return;
+    }
+    if (action === 'stop' && camera.recordingState !== 'recording') {
+      reply({ success: false, ...publicRecordingState(camera, 'No recording is active.') });
+      return;
+    }
+
+    camera.recordingCommandPending = action;
+    targetSocket.timeout(10000).emit('recording:control', { action }, (error, result) => {
+      camera.recordingCommandPending = null;
+      if (error) {
+        reply({ success: false, ...publicRecordingState(camera, 'The camera did not respond. Try again.') });
+        return;
+      }
+      if (!result || typeof result.success !== 'boolean' || !RECORDING_STATES.has(result.state)) {
+        reply({ success: false, ...publicRecordingState(camera, 'The camera returned an invalid response.') });
+        return;
+      }
+      const previousState = camera.recordingState;
+      camera.recordingState = result.state;
+      camera.recordingStartedAt = typeof result.startedAt === 'string' && !Number.isNaN(Date.parse(result.startedAt))
+        ? new Date(result.startedAt).toISOString()
+        : null;
+      const response = {
+        success: result.success,
+        ...publicRecordingState(camera, result.message)
+      };
+      if (camera.recordingState !== previousState) {
+        io.to(`user_${socket.userId}`).emit('recording:state', response);
+      }
+      reply(response);
+    });
+  });
+
+  socket.on('recording:state', ({ state, startedAt, message } = {}, acknowledge) => {
+    const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
+    const camera = activeCameras[socket.id];
+    if (!socket.userId || socket.deviceType !== 'camera' || !camera
+      || camera.userId !== socket.userId || !RECORDING_STATES.has(state)) {
+      reply({ success: false });
+      return;
+    }
+
+    camera.recordingState = state;
+    camera.recordingStartedAt = typeof startedAt === 'string' && !Number.isNaN(Date.parse(startedAt))
+      ? new Date(startedAt).toISOString()
+      : null;
+    const stateUpdate = publicRecordingState(camera, message);
+    io.to(`user_${socket.userId}`).emit('recording:state', stateUpdate);
+    reply({ success: true });
+  });
+
+  socket.on('recording:state-request', ({ targetSocketId } = {}, acknowledge) => {
+    const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
+    const camera = activeCameras[targetSocketId];
+    if (!socket.userId || socket.deviceType !== 'monitor' || !camera || camera.userId !== socket.userId) {
+      reply({ success: false, state: 'error', message: 'That camera is unavailable.' });
+      return;
+    }
+    reply({ success: true, ...publicRecordingState(camera) });
+  });
+
   // Handle Disconnection
   socket.on('disconnect', () => {
     if (socket.deviceType === 'camera') {
+      const camera = activeCameras[socket.id];
+      if (camera && ['recording', 'uploading'].includes(camera.recordingState)) {
+        io.to(`user_${socket.userId}`).emit('recording:state', {
+          cameraSocketId: socket.id,
+          state: 'error',
+          startedAt: camera.recordingStartedAt,
+          message: 'Camera disconnected while recording.'
+        });
+      }
       delete activeCameras[socket.id];
       console.log('Camera disconnected.');
       

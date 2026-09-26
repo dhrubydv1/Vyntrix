@@ -23,6 +23,8 @@ let recordingStopPromise = null;
 let resolveRecordingStop = null;
 let recordingFinalizedPromise = null;
 let resolveRecordingFinalized = null;
+let recordingPublicState = 'idle';
+let recordingPublicMessage = '';
 
 const deviceFacingHints = new Map();
 
@@ -293,6 +295,22 @@ function recordingIsActive() {
   return Boolean(mediaRecorder && mediaRecorder.state !== 'inactive');
 }
 
+function recordingStateSnapshot(message = recordingPublicMessage) {
+  return {
+    state: recordingPublicState,
+    startedAt: recordingStartedAt?.toISOString() || null,
+    message
+  };
+}
+
+function publishRecordingState(state, message = '') {
+  recordingPublicState = state;
+  recordingPublicMessage = message;
+  const snapshot = recordingStateSnapshot();
+  if (socket?.connected) socket.emit('recording:state', snapshot);
+  return snapshot;
+}
+
 function supportedRecordingMimeType() {
   if (!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== 'function') return null;
   const candidates = [
@@ -357,11 +375,18 @@ function updateRecordingControls(message = '', isError = false) {
 }
 
 async function startRecording() {
-  if (!isStreaming || !localStream || recordingPhase !== 'idle' || cameraSwitchInProgress) return;
+  if (!isStreaming || !localStream) {
+    return { success: false, ...recordingStateSnapshot('Start the camera before recording.') };
+  }
+  if (recordingPhase !== 'idle' || cameraSwitchInProgress) {
+    return { success: false, ...recordingStateSnapshot(
+      recordingPhase === 'recording' ? 'Recording is already active.' : 'The camera is busy. Try again shortly.'
+    ) };
+  }
   const mimeType = supportedRecordingMimeType();
   if (!mimeType) {
     updateRecordingControls('This browser does not support WebM or MP4 recording.', true);
-    return;
+    return { success: false, ...publishRecordingState('error', 'Recording is unavailable on this device.') };
   }
 
   try {
@@ -390,6 +415,7 @@ async function startRecording() {
     recordingTimerId = setInterval(updateRecordingTimer, 1000);
     updateFacingControls(activeFacingMode);
     updateRecordingControls();
+    return { success: true, ...publishRecordingState('recording') };
   } catch (error) {
     console.error('Could not start manual recording:', error?.name || 'Error');
     mediaRecorder = null;
@@ -401,6 +427,7 @@ async function startRecording() {
     recordingFinalizedPromise = null;
     resolveRecordingFinalized = null;
     updateRecordingControls('Recording could not start on this device.', true);
+    return { success: false, ...publishRecordingState('error', 'Recording could not start on this device.') };
   }
 }
 
@@ -410,6 +437,7 @@ function stopRecording() {
     recordingPhase = 'uploading';
     stopRecordingTimer();
     updateRecordingControls();
+    publishRecordingState('uploading', 'Saving recording securely…');
     mediaRecorder.stop();
   }
   return recordingStopPromise || Promise.resolve();
@@ -450,6 +478,7 @@ async function finalizeRecording(recorder, selectedMimeType) {
       throw new Error(result.error || 'Recording upload failed.');
     }
     updateRecordingControls('Recording saved securely.');
+    publishRecordingState('uploaded', 'Recording saved securely.');
   } catch (error) {
     console.error('Could not save manual recording:', error?.name || 'Error');
     updateRecordingControls(
@@ -458,6 +487,7 @@ async function finalizeRecording(recorder, selectedMimeType) {
         : 'Recording could not be saved. Check your connection and try a shorter clip.',
       true
     );
+    publishRecordingState('error', 'Recording could not be saved.');
   } finally {
     mediaRecorder = null;
     recordingChunks = [];
@@ -952,6 +982,7 @@ function connectSocket() {
       type: 'camera',
       cameraName
     });
+    publishRecordingState(recordingPublicState, recordingPublicMessage);
     if (isStreaming) {
       updateCameraStatus('streaming');
       showCameraOperationMessage();
@@ -1018,6 +1049,30 @@ function connectSocket() {
   socket.on('camera:switch', async ({ facingMode } = {}, acknowledge) => {
     const result = await switchCamera(facingMode);
     if (typeof acknowledge === 'function') acknowledge(result);
+  });
+
+  socket.on('recording:control', async ({ action } = {}, acknowledge) => {
+    const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
+    if (action === 'start') {
+      reply(await startRecording());
+      return;
+    }
+    if (action === 'stop') {
+      if (recordingPhase !== 'recording' || !recordingIsActive()) {
+        reply({ success: false, ...recordingStateSnapshot('No recording is active.') });
+        return;
+      }
+      void stopRecording();
+      reply({ success: true, ...recordingStateSnapshot('Saving recording securely…') });
+      return;
+    }
+    reply({ success: false, ...recordingStateSnapshot('Unknown recording command.') });
+  });
+
+  socket.on('recording:state-request', (_, acknowledge) => {
+    if (typeof acknowledge === 'function') {
+      acknowledge({ success: true, ...recordingStateSnapshot() });
+    }
   });
 }
 

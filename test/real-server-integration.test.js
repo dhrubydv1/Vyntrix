@@ -258,7 +258,7 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     assert.deepStrictEqual(camerasForB.map(camera => camera.cameraName), ['User B Camera']);
   });
 
-  it('blocks cross-user signaling, siren, and camera-switch commands', async () => {
+  it('blocks cross-user signaling, siren, camera-switch, and recording commands', async () => {
     const userA = await register(`socket_command_a_${Date.now()}`);
     const userB = await register(`socket_command_b_${Date.now()}`);
     const monitorA = await connectSocket(userA.cookie);
@@ -269,9 +269,11 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     let receivedSignal = false;
     let receivedSiren = false;
     let receivedCameraSwitch = false;
+    let receivedRecordingCommand = false;
     cameraB.on('webrtc-signal', () => { receivedSignal = true; });
     cameraB.on('trigger-siren', () => { receivedSiren = true; });
     cameraB.on('camera:switch', () => { receivedCameraSwitch = true; });
+    cameraB.on('recording:control', () => { receivedRecordingCommand = true; });
 
     monitorA.emit('webrtc-signal', {
       targetSocketId: cameraB.id,
@@ -285,12 +287,18 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
       targetSocketId: cameraB.id,
       facingMode: 'user'
     });
+    const recordingResult = await emitWithAck(monitorA, 'recording:control', {
+      targetSocketId: cameraB.id,
+      action: 'start'
+    });
 
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.strictEqual(receivedSignal, false);
     assert.strictEqual(receivedSiren, false);
     assert.strictEqual(receivedCameraSwitch, false);
+    assert.strictEqual(receivedRecordingCommand, false);
     assert.strictEqual(switchResult.success, false);
+    assert.strictEqual(recordingResult.success, false);
   });
 
   it('forwards camera-switch commands only to a same-user registered camera', async () => {
@@ -314,6 +322,126 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
       facingMode: 'environment',
       message: 'Camera switched.'
     });
+  });
+
+  it('forwards remote recording start and stop to the owned camera', async () => {
+    const user = await register(`socket_record_${Date.now()}`);
+    const monitor = await connectSocket(user.cookie);
+    const camera = await connectSocket(user.cookie);
+    await registerDevice(monitor, 'monitor');
+    await registerDevice(camera, 'camera', 'Recording Camera');
+    const startedAt = new Date().toISOString();
+    const receivedActions = [];
+
+    camera.on('recording:control', ({ action }, acknowledge) => {
+      receivedActions.push(action);
+      acknowledge({
+        success: true,
+        state: action === 'start' ? 'recording' : 'uploading',
+        startedAt,
+        message: action === 'start' ? '' : 'Saving recording securely…'
+      });
+    });
+
+    const started = await emitWithAck(monitor, 'recording:control', {
+      targetSocketId: camera.id,
+      action: 'start'
+    });
+    const stopped = await emitWithAck(monitor, 'recording:control', {
+      targetSocketId: camera.id,
+      action: 'stop'
+    });
+
+    assert.deepStrictEqual(receivedActions, ['start', 'stop']);
+    assert.strictEqual(started.success, true);
+    assert.strictEqual(started.state, 'recording');
+    assert.strictEqual(stopped.success, true);
+    assert.strictEqual(stopped.state, 'uploading');
+    assert.strictEqual(started.cameraSocketId, camera.id);
+  });
+
+  it('rejects duplicate remote recording commands while one is pending', async () => {
+    const user = await register(`record_dup_${Date.now()}`);
+    const monitor = await connectSocket(user.cookie);
+    const camera = await connectSocket(user.cookie);
+    await registerDevice(monitor, 'monitor');
+    await registerDevice(camera, 'camera', 'Duplicate Guard Camera');
+    let forwardedCommands = 0;
+
+    camera.on('recording:control', ({ action }, acknowledge) => {
+      forwardedCommands += 1;
+      setTimeout(() => acknowledge({
+        success: true,
+        state: 'recording',
+        startedAt: new Date().toISOString(),
+        message: ''
+      }), 100);
+    });
+
+    const firstCommand = emitWithAck(monitor, 'recording:control', {
+      targetSocketId: camera.id,
+      action: 'start'
+    });
+    const duplicateCommand = emitWithAck(monitor, 'recording:control', {
+      targetSocketId: camera.id,
+      action: 'start'
+    });
+    const [first, duplicate] = await Promise.all([firstCommand, duplicateCommand]);
+
+    assert.strictEqual(first.success, true);
+    assert.strictEqual(duplicate.success, false);
+    assert.match(duplicate.message, /already in progress/i);
+    assert.strictEqual(forwardedCommands, 1);
+  });
+
+  it('reports a disconnected camera without forwarding recording commands', async () => {
+    const user = await register(`record_off_${Date.now()}`);
+    const monitor = await connectSocket(user.cookie);
+    await registerDevice(monitor, 'monitor');
+
+    const result = await emitWithAck(monitor, 'recording:control', {
+      targetSocketId: 'missing-camera-socket',
+      action: 'start'
+    });
+
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.state, 'error');
+    assert.match(result.message, /unavailable/i);
+  });
+
+  it('syncs active recording state and reports a camera disconnect', async () => {
+    const user = await register(`record_state_${Date.now()}`);
+    const monitor = await connectSocket(user.cookie);
+    const camera = await connectSocket(user.cookie);
+    await registerDevice(monitor, 'monitor');
+    await registerDevice(camera, 'camera', 'State Sync Camera');
+    const startedAt = new Date().toISOString();
+    const pushedState = waitForEvent(monitor, 'recording:state');
+
+    const stateAccepted = await emitWithAck(camera, 'recording:state', {
+      state: 'recording',
+      startedAt,
+      message: ''
+    });
+    const update = await pushedState;
+    const requested = await emitWithAck(monitor, 'recording:state-request', {
+      targetSocketId: camera.id
+    });
+
+    assert.strictEqual(stateAccepted.success, true);
+    assert.strictEqual(update.cameraSocketId, camera.id);
+    assert.strictEqual(update.state, 'recording');
+    assert.strictEqual(requested.success, true);
+    assert.strictEqual(requested.state, 'recording');
+    assert.strictEqual(requested.startedAt, startedAt);
+
+    const cameraSocketId = camera.id;
+    const disconnectedState = waitForEvent(monitor, 'recording:state');
+    await closeSocket(camera);
+    const disconnected = await disconnectedState;
+    assert.strictEqual(disconnected.cameraSocketId, cameraSocketId);
+    assert.strictEqual(disconnected.state, 'error');
+    assert.match(disconnected.message, /disconnected while recording/i);
   });
 
   it('removes stale camera registrations and supports authenticated reconnect registration', async () => {
