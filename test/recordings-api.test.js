@@ -56,6 +56,29 @@ function request(method, route, userId) {
   });
 }
 
+function rawRequest(route, userId, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(route, baseUrl);
+    const req = http.request(url, {
+      method: 'GET',
+      headers: {
+        ...headers,
+        ...(userId ? { 'x-test-user': userId } : {})
+      }
+    }, (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        body: Buffer.concat(chunks),
+        headers: res.headers
+      }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 function recordingForm({
   bytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x02, 0x03, 0x04]),
   type = 'video/webm',
@@ -134,6 +157,7 @@ beforeEach(() => {
   };
   storage = {
     async uploadRecording() {},
+    async getRecording() { return { Body: Buffer.alloc(0) }; },
     async deleteRecording() {}
   };
 });
@@ -248,10 +272,71 @@ describe('recordings API', () => {
     assert.strictEqual(list.status, 200);
     assert.deepStrictEqual(list.body.recordings.map(recording => recording.id), ['recording-a']);
     assert.strictEqual(list.body.recordings[0].userId, undefined);
+    assert.strictEqual(list.body.recordings[0].objectKey, undefined);
 
     const crossUserRead = await request('GET', '/api/recordings/recording-b', 'user-a');
     assert.strictEqual(crossUserRead.status, 404);
     assert.deepStrictEqual(crossUserRead.body, { error: 'Recording not found.' });
+  });
+
+  it('requires ownership before requesting playback from R2', async () => {
+    let storageReads = 0;
+    storage.getRecording = async () => {
+      storageReads += 1;
+      return { Body: Buffer.alloc(0) };
+    };
+
+    const unauthenticated = await request('GET', '/api/recordings/recording-a/content');
+    assert.strictEqual(unauthenticated.status, 401);
+    const crossUser = await request('GET', '/api/recordings/recording-b/content', 'user-a');
+    assert.strictEqual(crossUser.status, 404);
+    assert.strictEqual(storageReads, 0);
+  });
+
+  it('streams an owned recording and supports normalized byte ranges', async () => {
+    const calls = [];
+    storage.getRecording = async (key, options) => {
+      calls.push([key, options]);
+      return { Body: Buffer.alloc(options ? 10 : 1024, 7) };
+    };
+
+    const full = await rawRequest('/api/recordings/recording-a/content', 'user-a');
+    assert.strictEqual(full.status, 200);
+    assert.strictEqual(full.body.length, 1024);
+    assert.strictEqual(full.headers['content-type'], 'video/webm');
+    assert.strictEqual(full.headers['accept-ranges'], 'bytes');
+
+    const partial = await rawRequest('/api/recordings/recording-a/content', 'user-a', {
+      Range: 'bytes=10-19'
+    });
+    assert.strictEqual(partial.status, 206);
+    assert.strictEqual(partial.body.length, 10);
+    assert.strictEqual(partial.headers['content-range'], 'bytes 10-19/1024');
+    assert.deepStrictEqual(calls, [
+      ['recordings/user-a/recording-a.webm', undefined],
+      ['recordings/user-a/recording-a.webm', { range: 'bytes=10-19' }]
+    ]);
+  });
+
+  it('returns a generic playback error and rejects invalid ranges before reading R2', async () => {
+    let storageReads = 0;
+    storage.getRecording = async () => {
+      storageReads += 1;
+      throw new Error('private R2 playback failure');
+    };
+
+    const response = await request('GET', '/api/recordings/recording-a/content', 'user-a');
+    assert.strictEqual(response.status, 503);
+    assert.ok(!JSON.stringify(response.body).includes('private R2 playback failure'));
+    assert.strictEqual(storageReads, 1);
+
+    storageReads = 0;
+    const invalid = await rawRequest('/api/recordings/recording-a/content', 'user-a', {
+      Range: 'bytes=2000-3000'
+    });
+    assert.strictEqual(invalid.status, 416);
+    assert.strictEqual(storageReads, 0);
+    assert.strictEqual(invalid.headers['content-range'], 'bytes */1024');
   });
 
   it('returns the same not-found response for absent and other-user recordings', async () => {

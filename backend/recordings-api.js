@@ -1,5 +1,6 @@
 const express = require('express');
 const crypto = require('node:crypto');
+const { pipeline } = require('node:stream/promises');
 const multer = require('multer');
 
 const RECORDING_CONTENT_TYPES = new Map([
@@ -46,11 +47,55 @@ function recordingObjectKey(userId, extension, startedAt) {
   return `recordings/${encodeURIComponent(userId)}/${day}/${crypto.randomUUID()}.${extension}`;
 }
 
+function parseByteRange(value, sizeBytes) {
+  if (!value) return null;
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1) return false;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value.trim());
+  if (!match || (!match[1] && !match[2])) return false;
+
+  let start;
+  let end;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength < 1) return false;
+    start = Math.max(0, sizeBytes - suffixLength);
+    end = sizeBytes - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : sizeBytes - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)
+      || start < 0 || start >= sizeBytes || end < start) return false;
+    end = Math.min(end, sizeBytes - 1);
+  }
+
+  return {
+    start,
+    end,
+    length: end - start + 1,
+    value: `bytes=${start}-${end}`
+  };
+}
+
+async function sendRecordingBody(body, res) {
+  if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+    res.end(body);
+    return;
+  }
+  if (body && typeof body.pipe === 'function') {
+    await pipeline(body, res);
+    return;
+  }
+  if (body && typeof body.transformToByteArray === 'function') {
+    res.end(Buffer.from(await body.transformToByteArray()));
+    return;
+  }
+  throw new Error('Recording storage returned an unsupported response body');
+}
+
 function toRecordingResponse(recording) {
   return {
     id: recording.id,
     cameraName: recording.cameraName,
-    objectKey: recording.objectKey,
     contentType: recording.contentType,
     sizeBytes: recording.sizeBytes,
     durationSeconds: recording.durationSeconds,
@@ -166,6 +211,46 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
     } catch (error) {
       console.error('Failed to list recordings.');
       return res.status(500).json({ error: 'Recordings could not be loaded. Please try again.' });
+    }
+  });
+
+  router.get('/:id/content', async (req, res) => {
+    try {
+      const recording = await db.getRecordingForUser(req.session.user.id, req.params.id);
+      if (!recording) return res.status(404).json({ error: 'Recording not found.' });
+
+      const range = parseByteRange(req.get('range'), recording.sizeBytes);
+      if (range === false) {
+        res.setHeader('Content-Range', `bytes */${recording.sizeBytes}`);
+        return res.status(416).json({ error: 'Requested recording range is invalid.' });
+      }
+
+      const storage = loadStorage();
+      const storedObject = await storage.getRecording(
+        recording.objectKey,
+        range ? { range: range.value } : undefined
+      );
+      const storedContentType = normalizedContentType(recording.contentType);
+      const contentType = RECORDING_CONTENT_TYPES.has(storedContentType)
+        ? storedContentType
+        : 'application/octet-stream';
+      const extension = RECORDING_CONTENT_TYPES.get(contentType) || 'bin';
+
+      res.status(range ? 206 : 200);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `inline; filename="vyntrix-recording.${extension}"`);
+      res.setHeader('Content-Length', String(range ? range.length : recording.sizeBytes));
+      if (range) res.setHeader('Content-Range', `bytes ${range.start}-${range.end}/${recording.sizeBytes}`);
+      await sendRecordingBody(storedObject.Body, res);
+      return undefined;
+    } catch (error) {
+      console.error('Failed to stream recording.');
+      if (res.headersSent) {
+        res.destroy();
+        return undefined;
+      }
+      return res.status(503).json({ error: 'Recording playback is temporarily unavailable.' });
     }
   });
 

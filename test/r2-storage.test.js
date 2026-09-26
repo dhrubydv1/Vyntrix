@@ -105,6 +105,27 @@ describe('Cloudflare R2 storage adapter', () => {
     ]);
   });
 
+  it('forwards a validated byte range when streaming a recording', async () => {
+    let command;
+    S3Client.prototype.send = async (sentCommand) => {
+      command = sentCommand;
+      return { Body: Buffer.from('clip') };
+    };
+    const storage = require(adapterPath);
+
+    await storage.getRecording('recordings/clip.webm', { range: 'bytes=10-19' });
+    assert.ok(command instanceof GetObjectCommand);
+    assert.deepStrictEqual(command.input, {
+      Bucket: 'test-recordings',
+      Key: 'recordings/clip.webm',
+      Range: 'bytes=10-19'
+    });
+    assert.throws(
+      () => storage.getRecording('recordings/clip.webm', { range: 'bytes=10-' }),
+      /normalized byte range/
+    );
+  });
+
   it('checks recording existence and treats only not-found responses as false', async () => {
     const calls = [];
     S3Client.prototype.send = async (command) => {

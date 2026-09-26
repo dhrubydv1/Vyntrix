@@ -1109,6 +1109,215 @@ main {
   min-height: 42px;
 }
 
+/* Recordings archive */
+.recordings-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.recordings-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+}
+
+.recordings-heading h1 {
+  margin: 0.3rem 0 0.45rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+}
+
+.recordings-heading p,
+.recordings-toolbar p,
+.recordings-state-card p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.recordings-summary {
+  flex: 0 0 auto;
+  min-width: 118px;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(57, 255, 20, 0.2);
+  border-radius: var(--radius-md);
+  background: rgba(57, 255, 20, 0.05);
+  text-align: center;
+}
+
+.recordings-summary strong,
+.recordings-summary span {
+  display: block;
+}
+
+.recordings-summary strong {
+  color: var(--accent-neon);
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+}
+
+.recordings-summary span {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.recordings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 44px;
+}
+
+.recordings-toolbar p.is-error {
+  color: #ffaaa6;
+}
+
+.recordings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.recordings-state-card {
+  grid-column: 1 / -1;
+  padding: 3rem 1.5rem;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  text-align: center;
+}
+
+.recordings-state-card h2 {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 1.1rem;
+}
+
+.recordings-state-icon {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(61, 214, 198, 0.1);
+  color: var(--accent-cyan);
+  font-size: 1.25rem;
+}
+
+.recording-list-card {
+  min-width: 0;
+  padding: 1.15rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  transition: opacity 0.2s ease, border-color 0.2s ease;
+}
+
+.recording-list-card.is-deleting {
+  opacity: 0.62;
+  border-color: rgba(255, 98, 92, 0.35);
+}
+
+.recording-list-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.recording-list-header h2 {
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+}
+
+.recording-list-header time {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.recording-status-badge {
+  flex: 0 0 auto;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.recording-status-badge.is-ready {
+  border-color: rgba(57, 255, 20, 0.25);
+  background: rgba(57, 255, 20, 0.08);
+  color: var(--accent-neon);
+}
+
+.recording-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.recording-details > div {
+  min-width: 0;
+  padding: 0.65rem;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.recording-details dt {
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  text-transform: uppercase;
+}
+
+.recording-details dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+}
+
+.recording-actions-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.65rem;
+}
+
+.recording-actions-row .btn {
+  min-height: 42px;
+}
+
+.recording-player {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.recording-player video {
+  display: block;
+  width: 100%;
+  max-height: min(60vh, 520px);
+  border-radius: var(--radius-md);
+  background: #000;
+}
+
+.recording-player-feedback {
+  min-height: 1.2em;
+  margin: 0.5rem 0 0;
+  color: #ffaaa6;
+  font-size: 0.75rem;
+}
+
 .camera-diagnostics {
   margin-top: 1rem;
   border: 1px dashed rgba(61, 214, 198, 0.35);
@@ -2480,6 +2689,14 @@ footer {
     padding: 0.9rem;
   }
 
+  .recordings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recordings-heading {
+    align-items: center;
+  }
+
   .footer-content {
     flex-direction: column;
     align-items: flex-start;
@@ -2529,6 +2746,32 @@ footer {
 
   .container {
     padding: 1rem;
+  }
+
+  .recordings-heading {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 1.1rem;
+  }
+
+  .recordings-summary {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 0.4rem;
+  }
+
+  .recordings-summary strong,
+  .recordings-summary span {
+    display: inline;
+  }
+
+  .recording-details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .recording-details > div:last-child {
+    grid-column: 1 / -1;
   }
 
   .hero {

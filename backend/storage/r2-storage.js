@@ -74,10 +74,14 @@ function uploadRecording({ key, body, contentType } = {}) {
   }));
 }
 
-function getRecording(key) {
+function getRecording(key, { range } = {}) {
+  if (range !== undefined && (typeof range !== 'string' || !/^bytes=\d+-\d+$/.test(range))) {
+    throw new TypeError('Recording range must be a normalized byte range.');
+  }
   return client.send(new GetObjectCommand({
     Bucket: configuration.bucket,
-    Key: validateKey(key)
+    Key: validateKey(key),
+    ...(range ? { Range: range } : {})
   }));
 }
 

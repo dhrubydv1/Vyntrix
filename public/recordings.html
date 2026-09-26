@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Recordings - Vyntrix</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <link rel="icon" type="image/png" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📹</text></svg>">
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/frontend-config.js"></script>
+  <script src="/js/auth.js"></script>
+</head>
+
+<body class="console-page recordings-page">
+  <header>
+    <div class="nav-container">
+      <a class="nav-logo" href="/">
+        <div class="logo-icon">
+          <span>V</span>
+          <div class="logo-dot"></div>
+        </div>
+        <div class="logo-text">Vyntrix</div>
+      </a>
+      <nav class="nav-links" id="nav-links-container" aria-label="Main navigation"></nav>
+      <div class="nav-actions" id="nav-actions"></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="container recordings-container">
+      <section class="recordings-heading" aria-labelledby="recordings-title">
+        <div>
+          <span class="page-eyebrow">Private camera archive</span>
+          <h1 id="recordings-title">Recordings</h1>
+          <p>Review manual clips saved securely from your Camera Console.</p>
+        </div>
+        <div class="recordings-summary">
+          <strong id="recordings-count">—</strong>
+          <span>saved clips</span>
+        </div>
+      </section>
+
+      <div class="recordings-toolbar">
+        <p id="recordings-status" role="status" aria-live="polite">Loading your recordings…</p>
+        <button type="button" class="btn btn-secondary" id="btn-retry-recordings" hidden>Try Again</button>
+      </div>
+
+      <section class="recordings-grid" id="recordings-list" aria-label="Saved recordings" aria-busy="true">
+        <div class="recordings-state-card">
+          <span class="recordings-state-icon" aria-hidden="true">◌</span>
+          <h2>Loading recordings</h2>
+          <p>Connecting securely to your private archive.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-content">
+      <div>&copy; 2026 Vyntrix. Private Recordings</div>
+    </div>
+  </footer>
+
+  <script src="/js/recordings.js"></script>
+</body>
+</html>

@@ -64,7 +64,8 @@ async function updateNavbar(options) {
     navLinksContainer.replaceChildren(
       createNavLink('link-home', '/', 'Home'),
       createNavLink('link-monitor', '/monitor.html', 'Web Monitor'),
-      createNavLink('link-camera', '/camera.html', 'Camera Console')
+      createNavLink('link-camera', '/camera.html', 'Camera Console'),
+      createNavLink('link-recordings', '/recordings.html', 'Recordings')
     );
 
     const badge = document.createElement('div');
@@ -99,6 +100,9 @@ async function updateNavbar(options) {
     if (link) link.classList.add('active');
   } else if (path.includes('/camera.html')) {
     const link = document.getElementById('link-camera');
+    if (link) link.classList.add('active');
+  } else if (path.includes('/recordings.html')) {
+    const link = document.getElementById('link-recordings');
     if (link) link.classList.add('active');
   }
 
