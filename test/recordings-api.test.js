@@ -9,6 +9,11 @@ let storage;
 let server;
 let baseUrl;
 
+const VALID_WEBM = Buffer.from(
+  '1a45dfa39f4286810142f7810142f2810442f381084282847765626d428781044285810218538067ff',
+  'hex'
+);
+
 const recordings = [
   {
     id: 'recording-a',
@@ -80,7 +85,7 @@ function rawRequest(route, userId, headers = {}) {
 }
 
 function recordingForm({
-  bytes = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x01, 0x02, 0x03, 0x04]),
+  bytes = VALID_WEBM,
   type = 'video/webm',
   extraFields = {}
 } = {}) {
@@ -121,7 +126,7 @@ before(() => {
   app.use('/api/recordings', requireAuth, createRecordingsRouter({
     db: dbProxy,
     loadStorage: () => storage,
-    maxUploadBytes: 32
+    maxUploadBytes: 128
   }));
   server = http.createServer(app);
   return new Promise(resolve => {
@@ -202,7 +207,7 @@ describe('recordings API', () => {
   });
 
   it('rejects recordings over the configured upload limit', async () => {
-    const bytes = Buffer.alloc(33);
+    const bytes = Buffer.alloc(129);
     Buffer.from([0x1a, 0x45, 0xdf, 0xa3]).copy(bytes);
     const response = await multipartRequest(recordingForm({ bytes }), 'user-a');
     assert.strictEqual(response.status, 413);
@@ -223,7 +228,7 @@ describe('recordings API', () => {
       assert.strictEqual(metadata.userId, 'user-a');
       assert.strictEqual(metadata.objectKey, uploadedKey);
       assert.strictEqual(metadata.status, 'uploaded');
-      assert.strictEqual(metadata.sizeBytes, 8);
+      assert.strictEqual(metadata.sizeBytes, VALID_WEBM.length);
       return {
         ...metadata,
         id: 'new-recording',

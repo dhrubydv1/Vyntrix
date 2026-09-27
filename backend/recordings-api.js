@@ -7,6 +7,7 @@ const RECORDING_CONTENT_TYPES = new Map([
   ['video/webm', 'webm'],
   ['video/mp4', 'mp4']
 ]);
+const RECORDING_SIGNATURE_PREFIX_BYTES = 4096;
 
 // Temporary production diagnostics intentionally exclude messages, request
 // data, identifiers, credentials, object keys, and media bytes.
@@ -24,19 +25,85 @@ function normalizedContentType(contentType) {
   return contentType.split(';', 1)[0].trim().toLowerCase();
 }
 
-function hasValidRecordingSignature(buffer, contentType) {
-  if (!Buffer.isBuffer(buffer)) return false;
-  if (contentType === 'video/webm') {
-    return buffer.length >= 4
-      && buffer[0] === 0x1a
-      && buffer[1] === 0x45
-      && buffer[2] === 0xdf
-      && buffer[3] === 0xa3;
+function readEbmlVint(buffer, offset, preserveMarker = false) {
+  if (offset >= buffer.length) return null;
+  const firstByte = buffer[offset];
+  let width = 1;
+  let marker = 0x80;
+  while (width <= 8 && !(firstByte & marker)) {
+    width += 1;
+    marker >>= 1;
   }
-  if (contentType === 'video/mp4') {
-    return buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp';
+  if (width > 8 || offset + width > buffer.length) return null;
+
+  let value = preserveMarker ? firstByte : firstByte & (marker - 1);
+  let unknown = !preserveMarker && (firstByte & (marker - 1)) === marker - 1;
+  for (let index = 1; index < width; index += 1) {
+    value = (value * 256) + buffer[offset + index];
+    if (!Number.isSafeInteger(value)) return null;
+    if (buffer[offset + index] !== 0xff) unknown = false;
+  }
+  return { width, value, unknown };
+}
+
+function hasValidWebmSignature(prefix) {
+  if (prefix.length < 8 || prefix.readUInt32BE(0) !== 0x1a45dfa3) return false;
+  const headerSize = readEbmlVint(prefix, 4);
+  if (!headerSize || headerSize.unknown || headerSize.value < 1) return false;
+  const headerStart = 4 + headerSize.width;
+  const headerEnd = headerStart + headerSize.value;
+  if (headerEnd > prefix.length) return false;
+
+  let offset = headerStart;
+  while (offset < headerEnd) {
+    const id = readEbmlVint(prefix, offset, true);
+    if (!id || id.width > 4) return false;
+    const size = readEbmlVint(prefix, offset + id.width);
+    if (!size || size.unknown) return false;
+    const valueStart = offset + id.width + size.width;
+    const valueEnd = valueStart + size.value;
+    if (valueEnd > headerEnd) return false;
+    if (id.value === 0x4282) {
+      return prefix.subarray(valueStart, valueEnd).toString('ascii').toLowerCase() === 'webm';
+    }
+    offset = valueEnd;
   }
   return false;
+}
+
+function hasValidMp4Signature(prefix, totalSize) {
+  let offset = 0;
+  while (offset + 8 <= prefix.length) {
+    let boxSize = prefix.readUInt32BE(offset);
+    const boxType = prefix.subarray(offset + 4, offset + 8).toString('ascii');
+    let headerSize = 8;
+    if (boxSize === 1) {
+      if (offset + 16 > prefix.length) return false;
+      const extendedSize = prefix.readBigUInt64BE(offset + 8);
+      if (extendedSize > BigInt(Number.MAX_SAFE_INTEGER)) return false;
+      boxSize = Number(extendedSize);
+      headerSize = 16;
+    } else if (boxSize === 0) {
+      boxSize = totalSize - offset;
+    }
+    if (boxSize < headerSize || offset + boxSize > totalSize) return false;
+
+    if (boxType === 'ftyp') {
+      if (boxSize < headerSize + 8 || offset + boxSize > prefix.length) return false;
+      const majorBrand = prefix.subarray(offset + headerSize, offset + headerSize + 4).toString('ascii');
+      const compatibleBrandsBytes = boxSize - headerSize - 8;
+      return /^[\x20-\x7e]{4}$/.test(majorBrand) && compatibleBrandsBytes % 4 === 0;
+    }
+    offset += boxSize;
+  }
+  return false;
+}
+
+function hasValidRecordingSignature(buffer, contentType) {
+  if (!Buffer.isBuffer(buffer) || !RECORDING_CONTENT_TYPES.has(contentType)) return false;
+  const prefix = buffer.subarray(0, Math.min(buffer.length, RECORDING_SIGNATURE_PREFIX_BYTES));
+  if (contentType === 'video/webm') return hasValidWebmSignature(prefix);
+  return hasValidMp4Signature(prefix, buffer.length);
 }
 
 function parseRecordingTime(value) {
@@ -313,4 +380,9 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
   return router;
 }
 
-module.exports = { createRecordingsRouter, toRecordingResponse, safeFailureDetails };
+module.exports = {
+  createRecordingsRouter,
+  toRecordingResponse,
+  safeFailureDetails,
+  hasValidRecordingSignature
+};
