@@ -1,6 +1,9 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { hasValidRecordingSignature } = require('../backend/recordings-api');
+const {
+  hasValidRecordingSignature,
+  recordingFormatDiagnostic
+} = require('../backend/recordings-api');
 
 function bmffBox(type, payload = Buffer.alloc(0)) {
   const box = Buffer.alloc(8 + payload.length);
@@ -48,5 +51,39 @@ describe('browser recording signature validation', () => {
 
     assert.strictEqual(hasValidRecordingSignature(webm, 'video/mp4'), false);
     assert.strictEqual(hasValidRecordingSignature(mp4, 'video/webm'), false);
+  });
+
+  it('reports only safe WebM rejection diagnostics', () => {
+    const malformedWebm = Buffer.from('1a45dfa300000000', 'hex');
+
+    assert.deepStrictEqual(recordingFormatDiagnostic(malformedWebm, 'video/webm;codecs=vp8,opus'), {
+      normalizedMimeType: 'video/webm',
+      fileSize: malformedWebm.length,
+      detectedContainer: 'webm',
+      ebmlMagicPresent: true
+    });
+  });
+
+  it('reports only the first recognized MP4 box type', () => {
+    const malformedFtyp = Buffer.from('0000000866747970', 'hex');
+
+    assert.deepStrictEqual(recordingFormatDiagnostic(malformedFtyp, 'video/mp4'), {
+      normalizedMimeType: 'video/mp4',
+      fileSize: malformedFtyp.length,
+      detectedContainer: 'mp4',
+      firstIsoBmffBoxType: 'ftyp'
+    });
+  });
+
+  it('classifies unrecognized bytes without exposing their contents', () => {
+    const randomPayload = Buffer.from('private bytes must not appear');
+    const diagnostic = recordingFormatDiagnostic(randomPayload, 'application/octet-stream');
+
+    assert.deepStrictEqual(diagnostic, {
+      normalizedMimeType: 'application/octet-stream',
+      fileSize: randomPayload.length,
+      detectedContainer: 'unknown'
+    });
+    assert.ok(!JSON.stringify(diagnostic).includes('private'));
   });
 });

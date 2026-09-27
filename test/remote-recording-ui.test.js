@@ -30,5 +30,6 @@ describe('remote recording frontend wiring', () => {
     assert.match(cameraScript, /on\('recording:control'/);
     assert.match(cameraScript, /reply\(await startRecording\(\)\)/);
     assert.match(cameraScript, /void stopRecording\(\)/);
+    assert.match(cameraScript, /MediaRecorder MIME type selected/);
   });
 });

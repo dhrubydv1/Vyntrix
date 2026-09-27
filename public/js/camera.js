@@ -450,6 +450,7 @@ async function finalizeRecording(recorder, selectedMimeType) {
     Math.round((performance.now() - recordingStartedMonotonic) / 1000)
   );
   const contentType = recorder.mimeType || selectedMimeType;
+  console.info('MediaRecorder MIME type selected', { mimeType: contentType });
   const blob = new Blob(recordingChunks, { type: contentType });
   resolveRecordingFinalized?.();
   resolveRecordingFinalized = null;

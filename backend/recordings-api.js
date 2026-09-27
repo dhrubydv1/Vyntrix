@@ -8,6 +8,9 @@ const RECORDING_CONTENT_TYPES = new Map([
   ['video/mp4', 'mp4']
 ]);
 const RECORDING_SIGNATURE_PREFIX_BYTES = 4096;
+const RECOGNIZED_ISO_BMFF_BOX_TYPES = new Set([
+  'ftyp', 'free', 'skip', 'wide', 'uuid', 'moov', 'mdat', 'styp', 'sidx', 'moof'
+]);
 
 // Temporary production diagnostics intentionally exclude messages, request
 // data, identifiers, credentials, object keys, and media bytes.
@@ -23,6 +26,56 @@ function safeFailureDetails(error) {
 function normalizedContentType(contentType) {
   if (typeof contentType !== 'string') return '';
   return contentType.split(';', 1)[0].trim().toLowerCase();
+}
+
+function firstRecognizedIsoBmffBoxType(buffer) {
+  const prefix = buffer.subarray(0, Math.min(buffer.length, RECORDING_SIGNATURE_PREFIX_BYTES));
+  let offset = 0;
+  while (offset + 8 <= prefix.length) {
+    const boxType = prefix.subarray(offset + 4, offset + 8).toString('ascii');
+    if (RECOGNIZED_ISO_BMFF_BOX_TYPES.has(boxType)) return boxType;
+
+    let boxSize = prefix.readUInt32BE(offset);
+    let headerSize = 8;
+    if (boxSize === 1) {
+      if (offset + 16 > prefix.length) return null;
+      const extendedSize = prefix.readBigUInt64BE(offset + 8);
+      if (extendedSize > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+      boxSize = Number(extendedSize);
+      headerSize = 16;
+    } else if (boxSize === 0) {
+      boxSize = buffer.length - offset;
+    }
+    if (boxSize < headerSize || offset + boxSize > buffer.length) return null;
+    offset += boxSize;
+  }
+  return null;
+}
+
+function recordingFormatDiagnostic(buffer, contentType) {
+  const normalizedMimeType = normalizedContentType(contentType);
+  const ebmlMagicPresent = Buffer.isBuffer(buffer)
+    && buffer.length >= 4
+    && buffer.readUInt32BE(0) === 0x1a45dfa3;
+  const firstIsoBmffBoxType = Buffer.isBuffer(buffer)
+    ? firstRecognizedIsoBmffBoxType(buffer)
+    : null;
+  const detectedContainer = ebmlMagicPresent
+    ? 'webm'
+    : firstIsoBmffBoxType
+      ? 'mp4'
+      : 'unknown';
+  return {
+    normalizedMimeType,
+    fileSize: Buffer.isBuffer(buffer) ? buffer.length : 0,
+    detectedContainer,
+    ...((normalizedMimeType === 'video/mp4' || detectedContainer === 'mp4') && firstIsoBmffBoxType
+      ? { firstIsoBmffBoxType }
+      : {}),
+    ...((normalizedMimeType === 'video/webm' || detectedContainer === 'webm')
+      ? { ebmlMagicPresent }
+      : {})
+  };
 }
 
 function readEbmlVint(buffer, offset, preserveMarker = false) {
@@ -230,7 +283,10 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
     const contentType = normalizedContentType(file.mimetype);
     const extension = RECORDING_CONTENT_TYPES.get(contentType);
     if (!extension || !hasValidRecordingSignature(file.buffer, contentType)) {
-      console.info('Recording rejected: unsupported MIME/signature');
+      console.info(
+        'Recording rejected: unsupported MIME/signature',
+        recordingFormatDiagnostic(file.buffer, contentType)
+      );
       return res.status(415).json({ error: 'Only WebM and MP4 recordings are supported.' });
     }
 
@@ -384,5 +440,6 @@ module.exports = {
   createRecordingsRouter,
   toRecordingResponse,
   safeFailureDetails,
-  hasValidRecordingSignature
+  hasValidRecordingSignature,
+  recordingFormatDiagnostic
 };
