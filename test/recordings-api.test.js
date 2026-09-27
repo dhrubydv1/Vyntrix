@@ -2,7 +2,7 @@ const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const express = require('express');
-const { createRecordingsRouter } = require('../backend/recordings-api');
+const { createRecordingsRouter, safeFailureDetails } = require('../backend/recordings-api');
 
 let database;
 let storage;
@@ -163,6 +163,23 @@ beforeEach(() => {
 });
 
 describe('recordings API', () => {
+  it('limits storage failure diagnostics to safe fields', () => {
+    const details = safeFailureDetails({
+      name: 'AccessDenied',
+      code: 'R2_FORBIDDEN',
+      message: 'private credential detail',
+      objectKey: 'private/object/key',
+      $metadata: { httpStatusCode: 403, requestId: 'private-request-id' }
+    });
+
+    assert.deepStrictEqual(details, {
+      name: 'AccessDenied',
+      statusCode: 403,
+      code: 'R2_FORBIDDEN'
+    });
+    assert.ok(!JSON.stringify(details).includes('private'));
+  });
+
   it('requires authentication', async () => {
     const response = await request('GET', '/api/recordings');
     assert.strictEqual(response.status, 401);

@@ -8,6 +8,17 @@ const RECORDING_CONTENT_TYPES = new Map([
   ['video/mp4', 'mp4']
 ]);
 
+// Temporary production diagnostics intentionally exclude messages, request
+// data, identifiers, credentials, object keys, and media bytes.
+function safeFailureDetails(error) {
+  const details = {};
+  if (typeof error?.name === 'string') details.name = error.name.slice(0, 80);
+  const statusCode = error?.$metadata?.httpStatusCode ?? error?.statusCode ?? error?.status;
+  if (Number.isInteger(statusCode)) details.statusCode = statusCode;
+  if (typeof error?.code === 'string') details.code = error.code.slice(0, 80);
+  return details;
+}
+
 function normalizedContentType(contentType) {
   if (typeof contentType !== 'string') return '';
   return contentType.split(';', 1)[0].trim().toLowerCase();
@@ -130,12 +141,14 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
     upload.single('recording')(req, res, (error) => {
       if (!error) return next();
       if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+        console.info('Recording rejected: upload too large');
         return res.status(413).json({ error: 'Recording is larger than the upload limit.' });
       }
       if (error instanceof multer.MulterError) {
+        console.info('Recording rejected: invalid multipart upload');
         return res.status(400).json({ error: 'The recording upload is invalid.' });
       }
-      console.error('Failed to parse recording upload.');
+      console.error('Recording upload parsing failed', safeFailureDetails(error));
       return res.status(500).json({ error: 'Recording could not be uploaded. Please try again.' });
     });
   }
@@ -143,12 +156,14 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
   router.post('/', acceptRecordingUpload, async (req, res) => {
     const file = req.file;
     if (!file || !file.buffer?.length) {
+      console.info('Recording rejected: missing file');
       return res.status(400).json({ error: 'A recording file is required.' });
     }
 
     const contentType = normalizedContentType(file.mimetype);
     const extension = RECORDING_CONTENT_TYPES.get(contentType);
     if (!extension || !hasValidRecordingSignature(file.buffer, contentType)) {
+      console.info('Recording rejected: unsupported MIME/signature');
       return res.status(415).json({ error: 'Only WebM and MP4 recordings are supported.' });
     }
 
@@ -156,6 +171,7 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
     const endedAt = parseRecordingTime(req.body.endedAt);
     const durationSeconds = parseDurationSeconds(req.body.durationSeconds);
     if (!startedAt || !endedAt || endedAt < startedAt || durationSeconds === null) {
+      console.info('Recording rejected: invalid timing');
       return res.status(400).json({ error: 'Recording timing information is invalid.' });
     }
 
@@ -168,15 +184,18 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
 
     try {
       const storage = loadStorage();
+      console.info('Recording R2 upload started');
       await storage.uploadRecording({
         key: objectKey,
         body: file.buffer,
         contentType
       });
       uploadCompleted = true;
+      console.info('Recording R2 upload succeeded');
 
       let recording;
       try {
+        console.info('Recording metadata save started');
         recording = await db.createRecording({
           userId,
           cameraName,
@@ -188,18 +207,22 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
           endedAt,
           status: 'uploaded'
         });
+        console.info('Recording metadata save succeeded');
       } catch (databaseError) {
         try {
           await storage.deleteRecording(objectKey);
         } catch (cleanupError) {
-          console.error('Failed to clean up an uploaded recording after metadata failure.');
+          console.error('Recording R2 cleanup failed', safeFailureDetails(cleanupError));
         }
         throw databaseError;
       }
 
       return res.status(201).json({ success: true, recording: toRecordingResponse(recording) });
     } catch (error) {
-      console.error(uploadCompleted ? 'Failed to save recording metadata.' : 'Failed to upload recording.');
+      console.error(
+        uploadCompleted ? 'Recording metadata save failed' : 'Recording R2 upload failed',
+        safeFailureDetails(error)
+      );
       return res.status(500).json({ error: 'Recording could not be saved. Please try again.' });
     }
   });
@@ -290,4 +313,4 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
   return router;
 }
 
-module.exports = { createRecordingsRouter, toRecordingResponse };
+module.exports = { createRecordingsRouter, toRecordingResponse, safeFailureDetails };

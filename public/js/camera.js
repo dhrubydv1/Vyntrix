@@ -474,8 +474,15 @@ async function finalizeRecording(recorder, selectedMimeType) {
       body: formData
     });
     const result = await response.json().catch(() => ({}));
+    const sanitizedServerError = typeof result.error === 'string'
+      ? result.error.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 160)
+      : '';
+    console.info('Recording upload response', {
+      status: response.status,
+      ...(sanitizedServerError ? { error: sanitizedServerError } : {})
+    });
     if (!response.ok || !result.success) {
-      throw new Error(result.error || 'Recording upload failed.');
+      throw new Error(sanitizedServerError || 'Recording upload failed.');
     }
     updateRecordingControls('Recording saved securely.');
     publishRecordingState('uploaded', 'Recording saved securely.');

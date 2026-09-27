@@ -296,7 +296,13 @@ app.delete('/api/alerts/:id', requireAuth, async (req, res) => {
 
 // Recording metadata is private to the authenticated owner. R2 remains a
 // server-only dependency and is loaded only for upload or deletion operations.
-app.use('/api/recordings', requireAuth, createRecordingsRouter({
+app.use('/api/recordings', (req, res, next) => {
+  if (req.method === 'POST' && (req.path === '/' || req.path === '')) {
+    console.info('Recording upload request received');
+    if (!req.session?.user) console.info('Recording rejected: unauthenticated');
+  }
+  next();
+}, requireAuth, createRecordingsRouter({
   db,
   loadStorage: () => require('./storage/r2-storage'),
   maxUploadBytes: MAX_RECORDING_UPLOAD_BYTES
