@@ -67,20 +67,24 @@
   }
 
   function nearestSupportedQuality(requestedQuality, capabilities = {}) {
+    return qualityFallbackOrder(requestedQuality, capabilities)[0];
+  }
+
+  function qualityFallbackOrder(requestedQuality, capabilities = {}) {
     const requested = normalizeQuality(requestedQuality);
     const supported = QUALITY_NAMES.filter((name) => {
       const preset = QUALITY_PRESETS[name];
       return capabilityRangeSupports(capabilities.width, preset.width)
         && capabilityRangeSupports(capabilities.height, preset.height);
     });
-    if (!supported.length || supported.includes(requested)) return requested;
+    const candidates = supported.length ? supported : [...QUALITY_NAMES];
     const requestedIndex = QUALITY_NAMES.indexOf(requested);
-    return supported.reduce((closest, candidate) => (
-      Math.abs(QUALITY_NAMES.indexOf(candidate) - requestedIndex)
-        < Math.abs(QUALITY_NAMES.indexOf(closest) - requestedIndex)
-        ? candidate
-        : closest
-    ));
+    return candidates.sort((first, second) => {
+      const firstIndex = QUALITY_NAMES.indexOf(first);
+      const secondIndex = QUALITY_NAMES.indexOf(second);
+      return Math.abs(firstIndex - requestedIndex) - Math.abs(secondIndex - requestedIndex)
+        || firstIndex - secondIndex;
+    });
   }
 
   function nearestQualityForDimensions(width, height, fallback = DEFAULT_QUALITY) {
@@ -109,6 +113,7 @@
     nearestQualityForDimensions,
     nearestSupportedQuality,
     normalizeQuality,
+    qualityFallbackOrder,
     qualityPreferenceKey,
     readQualityPreference,
     writeQualityPreference

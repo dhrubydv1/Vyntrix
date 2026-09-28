@@ -360,6 +360,25 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     assert.strictEqual(started.cameraSocketId, camera.id);
   });
 
+  it('syncs validated camera recording quality to the owner monitor only', async () => {
+    const user = await register(`socket_quality_${Date.now()}`);
+    const camera = await connectSocket(user.cookie);
+    const monitor = await connectSocket(user.cookie);
+    await registerDevice(camera, 'camera', 'Quality Camera');
+    const initialCameras = await registerDevice(monitor, 'monitor');
+    assert.strictEqual(initialCameras[0].recordingQuality, '720p');
+
+    const qualityUpdate = waitForEvent(monitor, 'camera:quality');
+    camera.emit('camera:quality', { quality: '1080p' });
+    const update = await qualityUpdate;
+    assert.deepStrictEqual(update, { cameraSocketId: camera.id, quality: '1080p' });
+
+    monitor.emit('camera:quality', { quality: '360p' });
+    const confirmingMonitor = await connectSocket(user.cookie);
+    const cameras = await registerDevice(confirmingMonitor, 'monitor');
+    assert.strictEqual(cameras[0].recordingQuality, '1080p');
+  });
+
   it('rejects duplicate remote recording commands while one is pending', async () => {
     const user = await register(`record_dup_${Date.now()}`);
     const monitor = await connectSocket(user.cookie);

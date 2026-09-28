@@ -58,13 +58,17 @@
       <div id="monitor-portal-view" class="portal-layout monitor-layout" style="display: none;">
         
         <!-- Live stream console -->
-        <div class="stream-card">
-          <div class="stream-title-bar">
-            <div>
+        <div class="stream-card monitor-stream-card">
+          <div class="stream-title-bar monitor-title-bar">
+            <div class="monitor-heading-group">
               <button class="btn btn-secondary back-button" id="btn-back-to-list">
                 ← Back to List
               </button>
-              <h2 id="active-camera-title">Living Room Camera</h2>
+              <div class="monitor-title-copy">
+                <span class="page-eyebrow">Live camera</span>
+                <h2 id="active-camera-title">Living Room Camera</h2>
+                <p>Secure real-time view and camera controls</p>
+              </div>
             </div>
             <div class="stream-status" role="status" aria-live="polite">
               <div class="status-indicator status-disconnected idle"></div>
@@ -91,8 +95,16 @@
           </div>
 
           <!-- Dash Control panel -->
-          <div class="controls-grid">
-            <div class="control-card">
+          <section class="monitor-controls-panel" aria-labelledby="monitor-controls-title">
+            <div class="monitor-controls-heading">
+              <div>
+                <span class="page-eyebrow">Camera workspace</span>
+                <h3 id="monitor-controls-title">View and recording controls</h3>
+              </div>
+              <span>Connected camera controls</span>
+            </div>
+          <div class="controls-grid monitor-controls-grid">
+            <div class="control-card monitor-control-card">
               <div class="control-header">
                 <span>Camera</span>
               </div>
@@ -103,7 +115,7 @@
               <p class="control-feedback" id="remote-camera-switch-status" role="status" aria-live="polite"></p>
             </div>
 
-            <div class="control-card recording-card remote-recording-card">
+            <div class="control-card monitor-control-card recording-card remote-recording-card monitor-recording-card">
               <div class="control-header">
                 <span>Recording</span>
                 <time class="recording-timer" id="remote-recording-elapsed" datetime="PT0S">00:00</time>
@@ -121,7 +133,7 @@
               <p class="control-description" id="remote-recording-quality-estimate">About 1.1 GB per hour</p>
             </div>
 
-            <div class="control-card">
+            <div class="control-card monitor-control-card">
               <div class="switch-container">
                 <div>
                   <h4>Mirror View</h4>
@@ -134,7 +146,7 @@
               </div>
             </div>
 
-            <div class="control-card rotate-control-card">
+            <div class="control-card monitor-control-card rotate-control-card">
               <div class="control-header">
                 <span>Orientation</span>
                 <span class="slider-val" id="rotation-val" aria-live="polite">0°</span>
@@ -145,7 +157,7 @@
               </button>
             </div>
 
-            <div class="control-card">
+            <div class="control-card monitor-control-card">
               <div class="control-header">
                 <span>Digital Zoom</span>
                 <span class="slider-val" id="zoom-val">1x</span>
@@ -155,7 +167,7 @@
               </div>
             </div>
 
-            <div class="control-card">
+            <div class="control-card monitor-control-card">
               <div class="switch-container">
                 <div>
                   <h4>Night Vision</h4>
@@ -168,27 +180,15 @@
               </div>
             </div>
 
-            <div class="control-card siren-control-card">
-              <div class="switch-container">
-                <div>
-                  <h4>Trigger Siren</h4>
-                  <p class="control-description">Play local alarm on camera</p>
-                </div>
-                <label class="switch">
-                  <input type="checkbox" id="control-siren" aria-label="Remote siren">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-
-            <div class="control-card">
+            <div class="control-card monitor-control-card monitor-talk-card">
               <button class="ptt-btn" id="btn-ptt" aria-label="Hold to talk to the camera" disabled>
                 <div class="ptt-pulse"></div>
-                <span style="font-size: 1.1rem;">🎤 TALK</span>
-                <span style="font-size: 0.7rem; opacity: 0.8; font-weight: 400;">Hold to talk (Walkie-Talkie)</span>
+                <span class="ptt-title">🎤 Talk</span>
+                <span class="ptt-caption">Press and hold to speak</span>
               </button>
             </div>
           </div>
+          </section>
         </div>
 
         <!-- Sidebar alerts logs -->

@@ -17,6 +17,7 @@ describe('remote recording frontend wiring', () => {
     assert.match(monitorHtml, /id="remote-recording-quality"/);
     assert.match(monitorHtml, /id="remote-recording-quality-estimate"/);
     assert.match(monitorHtml, /aria-live="polite"/);
+    assert.doesNotMatch(monitorHtml, /Trigger Siren|id="control-siren"/);
   });
 
   it('uses Socket.IO state sync and guards duplicate monitor commands', () => {
@@ -28,6 +29,7 @@ describe('remote recording frontend wiring', () => {
     assert.match(monitorScript, /\/api\/recordings\/storage/);
     assert.match(monitorScript, /No space available\. Delete old recordings to continue\./);
     assert.match(monitorScript, /on\('camera:quality'/);
+    assert.doesNotMatch(monitorScript, /control-siren|emit\('trigger-siren'/);
   });
 
   it('keeps MediaRecorder on the camera and reuses its recording functions', () => {

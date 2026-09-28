@@ -9,6 +9,7 @@ let iceServers = null;
 let activeFacingMode = 'environment';
 let cameraSwitchInProgress = false;
 let cameraStartInProgress = false;
+let qualityChangeInProgress = false;
 let videoInputDevices = [];
 let cameraStopInProgress = false;
 
@@ -314,7 +315,7 @@ function updateRecordingQualityControls(message = '', isError = false) {
   const preset = VyntrixRecordingQuality.getQualityPreset(activeRecordingQuality);
   const requestedPreset = VyntrixRecordingQuality.getQualityPreset(requestedRecordingQuality);
   const busy = recordingIsActive() || recordingPhase === 'uploading'
-    || cameraSwitchInProgress || cameraStartInProgress;
+    || cameraSwitchInProgress || cameraStartInProgress || qualityChangeInProgress;
   document.querySelectorAll('[data-recording-quality]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.recordingQuality === requestedRecordingQuality));
     button.disabled = busy;
@@ -344,6 +345,7 @@ function syncActiveRecordingQuality(track, fallback = requestedRecordingQuality)
 
 async function selectRecordingQuality(quality) {
   const normalized = VyntrixRecordingQuality.normalizeQuality(quality);
+  if (qualityChangeInProgress) return false;
   if (recordingIsActive() || recordingPhase === 'uploading') {
     updateRecordingQualityControls('Stop the current recording before changing quality.', true);
     return false;
@@ -358,18 +360,50 @@ async function selectRecordingQuality(quality) {
 
   const previousRequested = requestedRecordingQuality;
   const previousActive = activeRecordingQuality;
-  const supportedQuality = VyntrixRecordingQuality.nearestSupportedQuality(
+  const fallbackOrder = VyntrixRecordingQuality.qualityFallbackOrder(
     normalized,
     track.getCapabilities?.() || {}
   );
-  const preset = VyntrixRecordingQuality.getQualityPreset(supportedQuality);
+  qualityChangeInProgress = true;
+  updateRecordingQualityControls(`Applying ${normalized}…`);
   try {
-    await track.applyConstraints({
-      width: { ideal: preset.width },
-      height: { ideal: preset.height }
-    });
+    let appliedQuality = null;
+    let lastConstraintError = null;
+    for (const candidate of fallbackOrder) {
+      const preset = VyntrixRecordingQuality.getQualityPreset(candidate);
+      try {
+        await track.applyConstraints({
+          width: { exact: preset.width },
+          height: { exact: preset.height },
+          aspectRatio: { ideal: preset.width / preset.height }
+        });
+        appliedQuality = candidate;
+        break;
+      } catch (error) {
+        lastConstraintError = error;
+      }
+    }
+
+    // Some WebKit camera stacks reject exact constraints even though they can
+    // move toward an ideal. Keep this final attempt best-effort and verify the
+    // actual result from getSettings() below instead of trusting the request.
+    if (!appliedQuality) {
+      const fallbackQuality = fallbackOrder[0] || normalized;
+      const preset = VyntrixRecordingQuality.getQualityPreset(fallbackQuality);
+      try {
+        await track.applyConstraints({
+          width: { ideal: preset.width },
+          height: { ideal: preset.height },
+          aspectRatio: { ideal: preset.width / preset.height }
+        });
+        appliedQuality = fallbackQuality;
+      } catch (error) {
+        throw lastConstraintError || error;
+      }
+    }
+
     requestedRecordingQuality = VyntrixRecordingQuality.writeQualityPreference(localStorage, userId, normalized);
-    syncActiveRecordingQuality(track, supportedQuality);
+    syncActiveRecordingQuality(track, appliedQuality);
     if (activeRecordingQuality !== normalized) {
       updateRecordingQualityControls(`${activeRecordingQuality} is the nearest quality available on this camera.`);
     }
@@ -381,6 +415,12 @@ async function selectRecordingQuality(quality) {
     console.warn('Recording quality could not be applied:', error?.name || 'Error');
     updateRecordingQualityControls('This camera could not apply that quality. The previous quality is still active.', true);
     return false;
+  } finally {
+    qualityChangeInProgress = false;
+    updateRecordingQualityControls(
+      document.getElementById('recording-quality-status')?.textContent || '',
+      document.getElementById('recording-quality-status')?.classList.contains('is-error') || false
+    );
   }
 }
 

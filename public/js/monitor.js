@@ -141,17 +141,6 @@ function setupDOMListeners() {
     }
   });
 
-  // Siren toggle control
-  const sirenCheckbox = document.getElementById('control-siren');
-  sirenCheckbox.addEventListener('change', (e) => {
-    if (!activeCameraSocketId) return;
-    const action = e.target.checked ? 'start' : 'stop';
-    socket.emit('trigger-siren', {
-      targetSocketId: activeCameraSocketId,
-      action
-    });
-  });
-
   // Push to Talk (Walkie-Talkie) microphone trigger
   const pttButton = document.getElementById('btn-ptt');
   
@@ -695,14 +684,6 @@ function connectSocket() {
     }
   });
 
-  // Siren alert status sync
-  socket.on('trigger-siren', ({ action }) => {
-    const sirenCheckbox = document.getElementById('control-siren');
-    if (sirenCheckbox) {
-      sirenCheckbox.checked = (action === 'start');
-    }
-  });
-
   // Real-time Motion Alert logger
   socket.on('motion-alert', (alert) => {
     // Add alert to top of feed list
@@ -914,7 +895,6 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
   document.getElementById('control-zoom').value = 1;
   document.getElementById('zoom-val').innerText = '1x';
   document.getElementById('control-nightvision').checked = false;
-  document.getElementById('control-siren').checked = false;
   updateRemoteFacingControls();
   showRemoteCameraSwitchStatus();
   applyRemoteRecordingState({ state: 'idle' });
