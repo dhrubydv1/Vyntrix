@@ -16,6 +16,9 @@ const RECORDING_SIGNATURE_PREFIX_BYTES = 4096;
 const RECOGNIZED_ISO_BMFF_BOX_TYPES = new Set([
   'ftyp', 'free', 'skip', 'wide', 'uuid', 'moov', 'mdat', 'styp', 'sidx', 'moof'
 ]);
+const RECORDING_STORAGE_WARNING_BYTES = 8 * 1024 * 1024 * 1024;
+const RECORDING_STORAGE_QUOTA_BYTES = 9 * 1024 * 1024 * 1024;
+const RECORDING_STORAGE_FULL_MESSAGE = 'No space available. Delete old recordings to continue.';
 
 // Temporary production diagnostics intentionally exclude messages, request
 // data, identifiers, credentials, object keys, and media bytes.
@@ -263,6 +266,26 @@ function toRecordingResponse(recording) {
   };
 }
 
+function toRecordingStorageResponse(globalUsedBytes, userUsedBytes) {
+  const normalizedGlobalUsedBytes = Number.isSafeInteger(globalUsedBytes) && globalUsedBytes >= 0
+    ? globalUsedBytes
+    : 0;
+  const normalizedUserUsedBytes = Number.isSafeInteger(userUsedBytes) && userUsedBytes >= 0
+    ? userUsedBytes
+    : 0;
+  return {
+    globalUsedBytes: normalizedGlobalUsedBytes,
+    globalQuotaBytes: RECORDING_STORAGE_QUOTA_BYTES,
+    globalWarningBytes: RECORDING_STORAGE_WARNING_BYTES,
+    userUsedBytes: normalizedUserUsedBytes,
+    globalState: normalizedGlobalUsedBytes >= RECORDING_STORAGE_QUOTA_BYTES
+      ? 'full'
+      : normalizedGlobalUsedBytes >= RECORDING_STORAGE_WARNING_BYTES
+        ? 'warning'
+        : 'normal'
+  };
+}
+
 function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 1024 }) {
   if (!db || typeof loadStorage !== 'function') {
     throw new Error('Recordings API dependencies are required');
@@ -272,6 +295,7 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
   }
 
   const router = express.Router();
+  let pendingRecordingUploadBytes = 0;
   const upload = multer({
     storage: multer.memoryStorage(),
     limits: {
@@ -326,6 +350,23 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
     }
 
     const userId = req.session.user.id;
+    let storageUsage;
+    try {
+      storageUsage = await db.getRecordingStorageUsage(userId);
+    } catch (error) {
+      console.error('Recording storage usage lookup failed', safeFailureDetails(error));
+      return res.status(500).json({ error: 'Recording could not be saved. Please try again.' });
+    }
+    if (storageUsage.globalUsedBytes + pendingRecordingUploadBytes + file.size > RECORDING_STORAGE_QUOTA_BYTES) {
+      console.info('Recording rejected: storage quota exceeded');
+      return res.status(413).json({
+        error: RECORDING_STORAGE_FULL_MESSAGE,
+        code: 'RECORDING_STORAGE_FULL',
+        storage: toRecordingStorageResponse(storageUsage.globalUsedBytes, storageUsage.userUsedBytes)
+      });
+    }
+    pendingRecordingUploadBytes += file.size;
+
     const cameraName = typeof req.body.cameraName === 'string' && req.body.cameraName.trim()
       ? req.body.cameraName.trim().slice(0, 255)
       : 'Camera';
@@ -367,13 +408,22 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
         throw databaseError;
       }
 
-      return res.status(201).json({ success: true, recording: toRecordingResponse(recording) });
+      return res.status(201).json({
+        success: true,
+        recording: toRecordingResponse(recording),
+        storage: toRecordingStorageResponse(
+          storageUsage.globalUsedBytes + file.size,
+          storageUsage.userUsedBytes + file.size
+        )
+      });
     } catch (error) {
       console.error(
         uploadCompleted ? 'Recording metadata save failed' : 'Recording R2 upload failed',
         safeFailureDetails(error)
       );
       return res.status(500).json({ error: 'Recording could not be saved. Please try again.' });
+    } finally {
+      pendingRecordingUploadBytes = Math.max(0, pendingRecordingUploadBytes - file.size);
     }
   });
 
@@ -384,6 +434,19 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
     } catch (error) {
       console.error('Failed to list recordings.');
       return res.status(500).json({ error: 'Recordings could not be loaded. Please try again.' });
+    }
+  });
+
+  router.get('/storage', async (req, res) => {
+    try {
+      const storageUsage = await db.getRecordingStorageUsage(req.session.user.id);
+      return res.json(toRecordingStorageResponse(
+        storageUsage.globalUsedBytes,
+        storageUsage.userUsedBytes
+      ));
+    } catch (error) {
+      console.error('Failed to load recording storage usage', safeFailureDetails(error));
+      return res.status(500).json({ error: 'Recording storage could not be loaded. Please try again.' });
     }
   });
 
@@ -469,5 +532,9 @@ module.exports = {
   safeFailureDetails,
   hasValidRecordingSignature,
   recordingFormatDiagnostic,
-  resolveRecordingFormat
+  resolveRecordingFormat,
+  toRecordingStorageResponse,
+  RECORDING_STORAGE_WARNING_BYTES,
+  RECORDING_STORAGE_QUOTA_BYTES,
+  RECORDING_STORAGE_FULL_MESSAGE
 };

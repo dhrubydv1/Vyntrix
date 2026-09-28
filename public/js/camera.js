@@ -25,12 +25,17 @@ let recordingFinalizedPromise = null;
 let resolveRecordingFinalized = null;
 let recordingPublicState = 'idle';
 let recordingPublicMessage = '';
+let recordingStorageState = 'unknown';
+let recordingStorageRefreshPromise = null;
+let requestedRecordingQuality = '720p';
+let activeRecordingQuality = '720p';
 
 const deviceFacingHints = new Map();
 
 const CAMERA_FACING_STORAGE_KEY = 'vyntrix.camera.facingMode';
 const CAMERA_MIRROR_STORAGE_KEY = 'vyntrix.camera.mirrorPreview';
 const VALID_FACING_MODES = new Set(['user', 'environment']);
+const RECORDING_STORAGE_FULL_MESSAGE = 'No space available. Delete old recordings to continue.';
 
 // WebRTC connections map: monitorSocketId -> RTCPeerConnection
 const peerConnections = {};
@@ -60,6 +65,8 @@ async function init() {
   if (session.loggedIn) {
     userId = session.user.id;
     window.CCTV_USER_ID = userId;
+    requestedRecordingQuality = VyntrixRecordingQuality.readQualityPreference(localStorage, userId);
+    activeRecordingQuality = requestedRecordingQuality;
     // Suggest default camera name based on browser/OS
     const os = navigator.userAgent.includes('Windows') ? 'PC' : 
                navigator.userAgent.includes('Android') ? 'Android' : 
@@ -68,6 +75,7 @@ async function init() {
   }
   
   setupDOMListeners();
+  void refreshRecordingStorageState();
   setupTimeCounter();
   updateCameraStatus('connecting');
   showCameraOperationMessage('Connecting securely to Vyntrix…');
@@ -109,6 +117,9 @@ function setupDOMListeners() {
   mirrorToggle.checked = readBooleanPreference(CAMERA_MIRROR_STORAGE_KEY);
   applyLocalMirror(mirrorToggle.checked);
   updateRecordingControls();
+  updateRecordingQualityControls();
+
+  window.addEventListener('focus', () => { void refreshRecordingStorageState(); });
 
   document.querySelectorAll('[data-facing-mode]').forEach((button) => {
     button.addEventListener('click', async () => {
@@ -123,6 +134,10 @@ function setupDOMListeners() {
       }
       await switchCamera(facingMode);
     });
+  });
+
+  document.querySelectorAll('[data-recording-quality]').forEach((button) => {
+    button.addEventListener('click', () => { void selectRecordingQuality(button.dataset.recordingQuality); });
   });
 
   mirrorToggle.addEventListener('change', (event) => {
@@ -295,6 +310,112 @@ function recordingIsActive() {
   return Boolean(mediaRecorder && mediaRecorder.state !== 'inactive');
 }
 
+function updateRecordingQualityControls(message = '', isError = false) {
+  const preset = VyntrixRecordingQuality.getQualityPreset(activeRecordingQuality);
+  const requestedPreset = VyntrixRecordingQuality.getQualityPreset(requestedRecordingQuality);
+  const busy = recordingIsActive() || recordingPhase === 'uploading'
+    || cameraSwitchInProgress || cameraStartInProgress;
+  document.querySelectorAll('[data-recording-quality]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.recordingQuality === requestedRecordingQuality));
+    button.disabled = busy;
+    const estimate = button.querySelector('span');
+    if (estimate) estimate.textContent = VyntrixRecordingQuality.estimateLabel(button.dataset.recordingQuality).replace('About ', '~');
+  });
+  const current = document.getElementById('recording-quality-current');
+  const status = document.getElementById('recording-quality-status');
+  if (current) current.textContent = preset.label;
+  if (status) {
+    status.textContent = message || (activeRecordingQuality === requestedRecordingQuality
+      ? `${preset.label} selected · ${VyntrixRecordingQuality.estimateLabel(preset.label)}`
+      : `${preset.label} available · ${requestedPreset.label} was requested`);
+    status.classList.toggle('is-error', isError);
+  }
+}
+
+function syncActiveRecordingQuality(track, fallback = requestedRecordingQuality) {
+  const settings = track?.getSettings?.() || {};
+  activeRecordingQuality = VyntrixRecordingQuality.nearestQualityForDimensions(
+    settings.width,
+    settings.height,
+    fallback
+  );
+  updateRecordingQualityControls();
+}
+
+async function selectRecordingQuality(quality) {
+  const normalized = VyntrixRecordingQuality.normalizeQuality(quality);
+  if (recordingIsActive() || recordingPhase === 'uploading') {
+    updateRecordingQualityControls('Stop the current recording before changing quality.', true);
+    return false;
+  }
+  const track = localStream?.getVideoTracks?.()[0];
+  if (!track) {
+    requestedRecordingQuality = VyntrixRecordingQuality.writeQualityPreference(localStorage, userId, normalized);
+    activeRecordingQuality = requestedRecordingQuality;
+    updateRecordingQualityControls();
+    return true;
+  }
+
+  const previousRequested = requestedRecordingQuality;
+  const previousActive = activeRecordingQuality;
+  const supportedQuality = VyntrixRecordingQuality.nearestSupportedQuality(
+    normalized,
+    track.getCapabilities?.() || {}
+  );
+  const preset = VyntrixRecordingQuality.getQualityPreset(supportedQuality);
+  try {
+    await track.applyConstraints({
+      width: { ideal: preset.width },
+      height: { ideal: preset.height }
+    });
+    requestedRecordingQuality = VyntrixRecordingQuality.writeQualityPreference(localStorage, userId, normalized);
+    syncActiveRecordingQuality(track, supportedQuality);
+    if (activeRecordingQuality !== normalized) {
+      updateRecordingQualityControls(`${activeRecordingQuality} is the nearest quality available on this camera.`);
+    }
+    publishCameraQuality();
+    return true;
+  } catch (error) {
+    requestedRecordingQuality = previousRequested;
+    activeRecordingQuality = previousActive;
+    console.warn('Recording quality could not be applied:', error?.name || 'Error');
+    updateRecordingQualityControls('This camera could not apply that quality. The previous quality is still active.', true);
+    return false;
+  }
+}
+
+function publishCameraQuality() {
+  if (socket?.connected) socket.emit('camera:quality', { quality: activeRecordingQuality });
+}
+
+function applyRecordingStorageState(storage) {
+  if (storage && ['normal', 'warning', 'full'].includes(storage.globalState)) {
+    recordingStorageState = storage.globalState;
+  }
+  updateRecordingControls(
+    recordingStorageState === 'full' ? RECORDING_STORAGE_FULL_MESSAGE : '',
+    recordingStorageState === 'full'
+  );
+}
+
+function refreshRecordingStorageState() {
+  if (recordingStorageRefreshPromise) return recordingStorageRefreshPromise;
+  recordingStorageRefreshPromise = fetch(VyntrixConfig.apiUrl('/api/recordings/storage'), {
+    credentials: 'include'
+  })
+    .then(async (response) => {
+      if (!response.ok) throw new Error('Storage request failed');
+      applyRecordingStorageState(await response.json());
+      return recordingStorageState;
+    })
+    .catch((error) => {
+      console.warn('Recording storage state could not be refreshed:', error?.name || 'Error');
+      return recordingStorageState;
+    })
+    .finally(() => { recordingStorageRefreshPromise = null; });
+  return recordingStorageRefreshPromise;
+}
+
 function recordingStateSnapshot(message = recordingPublicMessage) {
   return {
     state: recordingPublicState,
@@ -358,7 +479,8 @@ function updateRecordingControls(message = '', isError = false) {
   card.classList.toggle('is-uploading', recordingPhase === 'uploading');
   startButton.hidden = recordingPhase !== 'idle';
   stopButton.hidden = recordingPhase === 'idle';
-  startButton.disabled = !isStreaming || !recordingSupported || cameraSwitchInProgress || cameraStopInProgress;
+  startButton.disabled = !isStreaming || !recordingSupported || cameraSwitchInProgress
+    || cameraStopInProgress || recordingStorageState === 'full';
   stopButton.disabled = recordingPhase !== 'recording';
   stopButton.textContent = recordingPhase === 'recording' ? 'Stop Recording' : 'Saving…';
   state.textContent = recordingPhase === 'recording'
@@ -367,9 +489,11 @@ function updateRecordingControls(message = '', isError = false) {
       ? 'Uploading securely…'
       : !recordingSupported
         ? 'Recording is unavailable in this browser'
-        : isStreaming
-          ? 'Ready to record'
-          : 'Start the camera to record';
+        : recordingStorageState === 'full'
+          ? 'No space available'
+          : isStreaming
+            ? 'Ready to record'
+            : 'Start the camera to record';
   feedback.textContent = message;
   feedback.classList.toggle('is-error', isError);
 }
@@ -383,6 +507,11 @@ async function startRecording() {
       recordingPhase === 'recording' ? 'Recording is already active.' : 'The camera is busy. Try again shortly.'
     ) };
   }
+  await refreshRecordingStorageState();
+  if (recordingStorageState === 'full') {
+    updateRecordingControls(RECORDING_STORAGE_FULL_MESSAGE, true);
+    return { success: false, ...publishRecordingState('error', RECORDING_STORAGE_FULL_MESSAGE) };
+  }
   const mimeType = supportedRecordingMimeType();
   if (!mimeType) {
     updateRecordingControls('This browser does not support WebM or MP4 recording.', true);
@@ -393,7 +522,12 @@ async function startRecording() {
     recordingChunks = [];
     recordingStartedAt = new Date();
     recordingStartedMonotonic = performance.now();
-    const recorder = new MediaRecorder(localStream, { mimeType });
+    const qualityPreset = VyntrixRecordingQuality.getQualityPreset(activeRecordingQuality);
+    const recorder = new MediaRecorder(localStream, {
+      mimeType,
+      videoBitsPerSecond: qualityPreset.videoBitsPerSecond,
+      audioBitsPerSecond: VyntrixRecordingQuality.AUDIO_BITS_PER_SECOND
+    });
     mediaRecorder = recorder;
     recordingStopPromise = new Promise(resolve => { resolveRecordingStop = resolve; });
     recordingFinalizedPromise = new Promise(resolve => { resolveRecordingFinalized = resolve; });
@@ -414,6 +548,7 @@ async function startRecording() {
     updateRecordingTimer();
     recordingTimerId = setInterval(updateRecordingTimer, 1000);
     updateFacingControls(activeFacingMode);
+    updateRecordingQualityControls();
     updateRecordingControls();
     return { success: true, ...publishRecordingState('recording') };
   } catch (error) {
@@ -483,19 +618,22 @@ async function finalizeRecording(recorder, selectedMimeType) {
       ...(sanitizedServerError ? { error: sanitizedServerError } : {})
     });
     if (!response.ok || !result.success) {
+      if (result.code === 'RECORDING_STORAGE_FULL') applyRecordingStorageState(result.storage);
       throw new Error(sanitizedServerError || 'Recording upload failed.');
     }
+    applyRecordingStorageState(result.storage);
     updateRecordingControls('Recording saved securely.');
     publishRecordingState('uploaded', 'Recording saved securely.');
   } catch (error) {
     console.error('Could not save manual recording:', error?.name || 'Error');
+    const storageFull = error?.message === RECORDING_STORAGE_FULL_MESSAGE;
     updateRecordingControls(
-      error?.message === 'Recording is larger than the upload limit.'
+      storageFull || error?.message === 'Recording is larger than the upload limit.'
         ? error.message
         : 'Recording could not be saved. Check your connection and try a shorter clip.',
       true
     );
-    publishRecordingState('error', 'Recording could not be saved.');
+    publishRecordingState('error', storageFull ? RECORDING_STORAGE_FULL_MESSAGE : 'Recording could not be saved.');
   } finally {
     mediaRecorder = null;
     recordingChunks = [];
@@ -507,6 +645,7 @@ async function finalizeRecording(recorder, selectedMimeType) {
     recordingStopPromise = null;
     recordingFinalizedPromise = null;
     updateFacingControls(activeFacingMode, cameraSwitchInProgress);
+    updateRecordingQualityControls();
     updateRecordingControls(
       document.getElementById('recording-feedback')?.textContent || '',
       document.getElementById('recording-feedback')?.classList.contains('is-error') || false
@@ -639,6 +778,7 @@ async function startCamera() {
     const detectedFacing = getTrackFacingMode(activeVideoTrack) || inferFacingFromLabel(activeVideoTrack?.label);
     if (detectedFacing) activeFacingMode = detectedFacing;
     rememberTrackFacing(activeVideoTrack, activeFacingMode);
+    syncActiveRecordingQuality(activeVideoTrack);
     await refreshVideoInputDevices();
     
     // Set UI state
@@ -675,13 +815,15 @@ async function startCamera() {
     cameraStartInProgress = false;
     startButton.disabled = false;
     startButton.textContent = 'Start Camera';
+    updateRecordingQualityControls();
   }
 }
 
 function cameraVideoConstraints(facingMode, requireFacingMode = false) {
+  const quality = VyntrixRecordingQuality.getQualityPreset(requestedRecordingQuality);
   return {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
+    width: { ideal: quality.width },
+    height: { ideal: quality.height },
     ...(VALID_FACING_MODES.has(facingMode) && {
       facingMode: requireFacingMode ? { exact: facingMode } : { ideal: facingMode }
     })
@@ -689,9 +831,10 @@ function cameraVideoConstraints(facingMode, requireFacingMode = false) {
 }
 
 function cameraDeviceConstraints(deviceId) {
+  const quality = VyntrixRecordingQuality.getQualityPreset(requestedRecordingQuality);
   return {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
+    width: { ideal: quality.width },
+    height: { ideal: quality.height },
     deviceId: { exact: deviceId }
   };
 }
@@ -788,6 +931,8 @@ function installActiveVideoTrack(track, audioTracks, facingMode) {
   prevFrameData = null;
   activeFacingMode = getTrackFacingMode(track) || inferFacingFromLabel(track.label) || facingMode;
   rememberTrackFacing(track, activeFacingMode);
+  syncActiveRecordingQuality(track);
+  publishCameraQuality();
   updateCameraDiagnostics(track);
 }
 
@@ -882,6 +1027,7 @@ async function switchCamera(facingMode) {
   } finally {
     cameraSwitchInProgress = false;
     updateFacingControls(activeFacingMode);
+    updateRecordingQualityControls();
     updateRecordingControls();
     if (isStreaming) updateCameraStatus('streaming');
   }
@@ -988,7 +1134,8 @@ function connectSocket() {
     console.log('Connected to signaling server');
     signalingSocket.emit('register-device', {
       type: 'camera',
-      cameraName
+      cameraName,
+      recordingQuality: activeRecordingQuality
     });
     publishRecordingState(recordingPublicState, recordingPublicMessage);
     if (isStreaming) {

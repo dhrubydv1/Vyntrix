@@ -33,9 +33,25 @@
           <h1 id="recordings-title">Recordings</h1>
           <p>Review manual clips saved securely from your Camera Console.</p>
         </div>
-        <div class="recordings-summary">
-          <strong id="recordings-count">—</strong>
-          <span>saved clips</span>
+        <div class="recordings-heading-summaries">
+          <div class="recordings-summary">
+            <strong id="recordings-count">—</strong>
+            <span>saved clips</span>
+          </div>
+          <div class="recordings-storage" id="recordings-global-storage" data-state="loading">
+            <div class="recordings-storage-copy">
+              <strong id="recordings-global-storage-usage">— / 9 GB shared</strong>
+              <span id="recordings-global-storage-state">Loading shared storage…</span>
+            </div>
+            <progress id="recordings-global-storage-progress" max="100" value="0" aria-label="Shared recording storage used"></progress>
+          </div>
+          <div class="recordings-storage recordings-personal-storage" id="recordings-personal-storage" data-state="loading">
+            <div class="recordings-storage-copy">
+              <strong id="recordings-personal-storage-usage">— personal usage</strong>
+              <span>Your recordings only · no personal hard limit</span>
+            </div>
+            <p class="personal-usage-notice" id="recordings-personal-usage-notice" role="status" aria-live="polite" hidden></p>
+          </div>
         </div>
       </section>
 
@@ -60,6 +76,7 @@
     </div>
   </footer>
 
+  <script src="/js/recording-storage.js"></script>
   <script src="/js/recordings.js"></script>
 </body>
 </html>

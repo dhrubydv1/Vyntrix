@@ -352,6 +352,22 @@ async function listRecordingsForUser(userId) {
   return result.rows.map(mapRecording);
 }
 
+async function getRecordingStorageUsage(userId) {
+  const result = await pool.query(
+    `SELECT
+       COALESCE(SUM(size_bytes), 0)::bigint AS global_used_bytes,
+       COALESCE(SUM(size_bytes) FILTER (WHERE user_id = $1), 0)::bigint AS user_used_bytes
+     FROM recordings`,
+    [userId]
+  );
+  const globalUsedBytes = Number(result.rows[0]?.global_used_bytes || 0);
+  const userUsedBytes = Number(result.rows[0]?.user_used_bytes || 0);
+  if (![globalUsedBytes, userUsedBytes].every(value => Number.isSafeInteger(value) && value >= 0)) {
+    throw new Error('Recording storage usage is invalid');
+  }
+  return { globalUsedBytes, userUsedBytes };
+}
+
 async function getRecordingForUser(userId, recordingId) {
   const result = await pool.query(
     `SELECT id, user_id, camera_name, object_key, content_type, size_bytes,
@@ -386,6 +402,7 @@ module.exports = {
   deleteAlert,
   createRecording,
   listRecordingsForUser,
+  getRecordingStorageUsage,
   getRecordingForUser,
   deleteRecordingForUser
 };

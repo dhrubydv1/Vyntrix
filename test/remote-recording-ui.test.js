@@ -14,6 +14,8 @@ describe('remote recording frontend wiring', () => {
     assert.match(monitorHtml, /id="btn-stop-remote-recording"/);
     assert.match(monitorHtml, /id="remote-recording-elapsed"/);
     assert.match(monitorHtml, /id="remote-recording-state"/);
+    assert.match(monitorHtml, /id="remote-recording-quality"/);
+    assert.match(monitorHtml, /id="remote-recording-quality-estimate"/);
     assert.match(monitorHtml, /aria-live="polite"/);
   });
 
@@ -23,6 +25,9 @@ describe('remote recording frontend wiring', () => {
     assert.match(monitorScript, /emit\('recording:state-request'/);
     assert.match(monitorScript, /on\('recording:state'/);
     assert.match(monitorScript, /remoteRecordingState === 'recording' \|\| remoteRecordingState === 'uploading'/);
+    assert.match(monitorScript, /\/api\/recordings\/storage/);
+    assert.match(monitorScript, /No space available\. Delete old recordings to continue\./);
+    assert.match(monitorScript, /on\('camera:quality'/);
   });
 
   it('keeps MediaRecorder on the camera and reuses its recording functions', () => {
@@ -31,5 +36,7 @@ describe('remote recording frontend wiring', () => {
     assert.match(cameraScript, /reply\(await startRecording\(\)\)/);
     assert.match(cameraScript, /void stopRecording\(\)/);
     assert.match(cameraScript, /MediaRecorder MIME type selected/);
+    assert.match(cameraScript, /\/api\/recordings\/storage/);
+    assert.match(cameraScript, /No space available\. Delete old recordings to continue\./);
   });
 });

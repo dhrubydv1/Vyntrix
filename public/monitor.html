@@ -117,6 +117,8 @@
                 <button type="button" class="btn btn-danger" id="btn-stop-remote-recording" hidden disabled>Stop Recording</button>
               </div>
               <p class="control-feedback" id="remote-recording-feedback" role="status" aria-live="polite"></p>
+              <p class="recording-quality-summary"><span>Camera quality</span><strong id="remote-recording-quality">720p</strong></p>
+              <p class="control-description" id="remote-recording-quality-estimate">About 1.1 GB per hour</p>
             </div>
 
             <div class="control-card">
@@ -235,6 +237,7 @@
     </div>
   </footer>
 
+  <script src="/js/recording-quality.js"></script>
   <script src="/js/monitor.js"></script>
 </body>
 </html>

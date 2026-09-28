@@ -13,8 +13,15 @@ describe('recordings frontend', () => {
     assert.match(html, /id="recordings-list"/);
     assert.match(html, /id="recordings-status"/);
     assert.match(html, /id="btn-retry-recordings"/);
+    assert.match(html, /id="recordings-global-storage-usage"/);
+    assert.match(html, /id="recordings-global-storage-state"/);
+    assert.match(html, /id="recordings-personal-storage-usage"/);
+    assert.match(html, /id="recordings-personal-usage-notice"/);
     assert.match(script, /protectPage\(\)/);
     assert.match(script, /\/api\/recordings/);
+    assert.match(script, /\/api\/recordings\/storage/);
+    assert.match(script, /Storage almost full/);
+    assert.match(script, /No space available/);
     assert.match(script, /credentials: 'include'/);
     assert.match(script, /Delete/);
     assert.match(script, /Play/);

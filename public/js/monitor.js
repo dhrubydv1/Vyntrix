@@ -16,6 +16,9 @@ let remoteRecordingState = 'idle';
 let remoteRecordingStartedAt = null;
 let remoteRecordingCommandInProgress = false;
 let remoteRecordingTimerId = null;
+let remoteRecordingStorageState = 'unknown';
+let remoteRecordingStorageRefreshPromise = null;
+let remoteRecordingQuality = '720p';
 let remoteVideoRotation = 0;
 let remoteOrientationLayoutFrame = null;
 let remoteStageResizeObserver = null;
@@ -23,6 +26,7 @@ let remoteStageResizeObserver = null;
 const MONITOR_MIRROR_STORAGE_KEY = 'vyntrix.monitor.mirrorView';
 const VALID_FACING_MODES = new Set(['user', 'environment']);
 const VALID_RECORDING_STATES = new Set(['idle', 'recording', 'uploading', 'uploaded', 'error']);
+const RECORDING_STORAGE_FULL_MESSAGE = 'No space available. Delete old recordings to continue.';
 
 // Audio variables for Walkie Talkie mic
 let micStream = null;
@@ -48,6 +52,7 @@ async function init() {
   fetchAlertLogs();
   
   setupDOMListeners();
+  void refreshRemoteRecordingStorageState();
   setupTimeCounter();
   try {
     iceServers = await getIceServers();
@@ -67,6 +72,7 @@ function setupDOMListeners() {
   document.getElementById('btn-toggle-fullscreen').addEventListener('click', toggleMonitorFullscreen);
   document.getElementById('btn-start-remote-recording').addEventListener('click', () => requestRemoteRecordingControl('start'));
   document.getElementById('btn-stop-remote-recording').addEventListener('click', () => requestRemoteRecordingControl('stop'));
+  window.addEventListener('focus', () => { void refreshRemoteRecordingStorageState(); });
   
   // Close modal when clicking outside content
   window.addEventListener('click', (e) => {
@@ -85,6 +91,7 @@ function setupDOMListeners() {
   mirrorToggle.checked = readBooleanPreference(MONITOR_MIRROR_STORAGE_KEY);
   applyRemoteMirror(mirrorToggle.checked);
   setRemoteVideoRotation(0);
+  updateRemoteRecordingQuality();
 
   videoEl.addEventListener('loadedmetadata', updateRemoteVideoLayout);
   videoEl.addEventListener('resize', updateRemoteVideoLayout);
@@ -383,6 +390,14 @@ function updateRemoteFacingControls(facingMode = null, disabled = false) {
   });
 }
 
+function updateRemoteRecordingQuality(quality = '720p') {
+  remoteRecordingQuality = VyntrixRecordingQuality.normalizeQuality(quality);
+  const qualityElement = document.getElementById('remote-recording-quality');
+  const estimate = document.getElementById('remote-recording-quality-estimate');
+  if (qualityElement) qualityElement.textContent = remoteRecordingQuality;
+  if (estimate) estimate.textContent = `${VyntrixRecordingQuality.estimateLabel(remoteRecordingQuality)} on the camera device`;
+}
+
 function formatRemoteRecordingElapsed(totalSeconds) {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -414,6 +429,32 @@ function stopRemoteRecordingTimer({ reset = false } = {}) {
   }
 }
 
+function refreshRemoteRecordingStorageState() {
+  if (remoteRecordingStorageRefreshPromise) return remoteRecordingStorageRefreshPromise;
+  remoteRecordingStorageRefreshPromise = fetch(VyntrixConfig.apiUrl('/api/recordings/storage'), {
+    credentials: 'include'
+  })
+    .then(async (response) => {
+      if (!response.ok) throw new Error('Storage request failed');
+      const storage = await response.json();
+      if (['normal', 'warning', 'full'].includes(storage.globalState)) {
+        remoteRecordingStorageState = storage.globalState;
+      }
+      applyRemoteRecordingState({
+        state: remoteRecordingState,
+        startedAt: remoteRecordingStartedAt ? new Date(remoteRecordingStartedAt).toISOString() : null,
+        message: remoteRecordingStorageState === 'full' ? RECORDING_STORAGE_FULL_MESSAGE : ''
+      }, { forceError: remoteRecordingStorageState === 'full' });
+      return remoteRecordingStorageState;
+    })
+    .catch((error) => {
+      console.warn('Recording storage state could not be refreshed:', error?.name || 'Error');
+      return remoteRecordingStorageState;
+    })
+    .finally(() => { remoteRecordingStorageRefreshPromise = null; });
+  return remoteRecordingStorageRefreshPromise;
+}
+
 function applyRemoteRecordingState(update = {}, { forceError = false } = {}) {
   if (!VALID_RECORDING_STATES.has(update.state)) return;
   remoteRecordingState = update.state;
@@ -436,7 +477,9 @@ function applyRemoteRecordingState(update = {}, { forceError = false } = {}) {
   const startButton = document.getElementById('btn-start-remote-recording');
   const stopButton = document.getElementById('btn-stop-remote-recording');
   const labels = {
-    idle: activeCameraSocketId ? 'Ready to record' : 'Connect to a camera to record',
+    idle: remoteRecordingStorageState === 'full'
+      ? 'No space available'
+      : activeCameraSocketId ? 'Ready to record' : 'Connect to a camera to record',
     recording: 'Recording in progress',
     uploading: 'Stopping and uploading…',
     uploaded: 'Recording uploaded',
@@ -453,7 +496,8 @@ function applyRemoteRecordingState(update = {}, { forceError = false } = {}) {
     const busy = remoteRecordingCommandInProgress;
     startButton.hidden = update.state === 'recording' || update.state === 'uploading';
     stopButton.hidden = update.state !== 'recording' && update.state !== 'uploading';
-    startButton.disabled = busy || !activeCameraSocketId || !socket?.connected;
+    startButton.disabled = busy || !activeCameraSocketId || !socket?.connected
+      || remoteRecordingStorageState === 'full';
     stopButton.disabled = busy || update.state !== 'recording' || !socket?.connected;
     stopButton.textContent = update.state === 'uploading' ? 'Uploading…' : 'Stop Recording';
   }
@@ -479,7 +523,7 @@ function requestRemoteRecordingState() {
   });
 }
 
-function requestRemoteRecordingControl(action) {
+async function requestRemoteRecordingControl(action) {
   if (!['start', 'stop'].includes(action) || remoteRecordingCommandInProgress) return;
   if (!socket?.connected || !activeCameraSocketId) {
     applyRemoteRecordingState({ state: 'error', message: 'Connect to a camera before recording.' }, { forceError: true });
@@ -487,6 +531,13 @@ function requestRemoteRecordingControl(action) {
   }
   if ((action === 'start' && ['recording', 'uploading'].includes(remoteRecordingState))
     || (action === 'stop' && remoteRecordingState !== 'recording')) return;
+  if (action === 'start') {
+    await refreshRemoteRecordingStorageState();
+    if (remoteRecordingStorageState === 'full') {
+      applyRemoteRecordingState({ state: 'error', message: RECORDING_STORAGE_FULL_MESSAGE }, { forceError: true });
+      return;
+    }
+  }
 
   remoteRecordingCommandInProgress = true;
   applyRemoteRecordingState({
@@ -505,6 +556,9 @@ function requestRemoteRecordingControl(action) {
         startedAt: response?.startedAt || null,
         message: response?.message || 'The camera did not respond. Try again.'
       }, { forceError: true });
+      if (response?.message === RECORDING_STORAGE_FULL_MESSAGE) {
+        void refreshRemoteRecordingStorageState();
+      }
       return;
     }
     applyRemoteRecordingState(response);
@@ -597,6 +651,7 @@ function connectSocket() {
     updateCameraNetworkState(availableCameras.length ? `${availableCameras.length} camera${availableCameras.length === 1 ? '' : 's'} online` : 'No cameras are currently online.');
     renderCameraSelectionGrid(availableCameras);
     const selectedCamera = availableCameras.find(camera => camera.socketId === activeCameraSocketId);
+    if (selectedCamera?.recordingQuality) updateRemoteRecordingQuality(selectedCamera.recordingQuality);
     if (selectedCamera?.recordingState) {
       applyRemoteRecordingState({
         state: selectedCamera.recordingState,
@@ -609,6 +664,15 @@ function connectSocket() {
   socket.on('recording:state', (stateUpdate) => {
     if (stateUpdate?.cameraSocketId !== activeCameraSocketId) return;
     applyRemoteRecordingState(stateUpdate);
+    if (stateUpdate.state === 'uploaded'
+      || stateUpdate.message === RECORDING_STORAGE_FULL_MESSAGE) {
+      void refreshRemoteRecordingStorageState();
+    }
+  });
+
+  socket.on('camera:quality', (qualityUpdate) => {
+    if (qualityUpdate?.cameraSocketId !== activeCameraSocketId) return;
+    updateRemoteRecordingQuality(qualityUpdate.quality);
   });
 
   // Signal feedback from camera
@@ -834,6 +898,9 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
   const attempt = ++monitorConnectionAttempt;
   activeCameraSocketId = socketId;
   activeCameraName = name;
+  updateRemoteRecordingQuality(
+    availableCameras.find(camera => camera.socketId === socketId)?.recordingQuality || '720p'
+  );
   remoteFacingMode = null;
   if (cameraChanged) setRemoteVideoRotation(0);
   updateMonitorStatus(isReconnect ? 'reconnecting' : 'connecting');

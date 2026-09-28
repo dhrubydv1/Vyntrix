@@ -91,6 +91,18 @@ describe('PostgreSQL recording helpers', () => {
     assert.deepStrictEqual(calls[2].params, ['user-2', 'recording-1']);
   });
 
+  it('calculates global and owner recording storage usage in one parameterized query', async () => {
+    calls.length = 0;
+    queryHandler = async () => ({ rows: [{ global_used_bytes: '987654321', user_used_bytes: '123456789' }] });
+
+    const usage = await db.getRecordingStorageUsage('user-1');
+
+    assert.deepStrictEqual(usage, { globalUsedBytes: 987654321, userUsedBytes: 123456789 });
+    assert.match(calls[0].sql, /COALESCE\(SUM\(size_bytes\), 0\)/);
+    assert.match(calls[0].sql, /FILTER \(WHERE user_id = \$1\)/);
+    assert.deepStrictEqual(calls[0].params, ['user-1']);
+  });
+
   it('propagates database failures to the API boundary', async () => {
     queryHandler = async () => {
       throw new Error('private database detail');

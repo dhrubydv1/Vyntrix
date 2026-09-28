@@ -311,6 +311,7 @@ app.use('/api/recordings', (req, res, next) => {
 // Real-time Socket.io Communications
 const activeCameras = {}; // socket.id -> camera registration and recording state
 const RECORDING_STATES = new Set(['idle', 'recording', 'uploading', 'uploaded', 'error']);
+const RECORDING_QUALITIES = new Set(['360p', '480p', '720p', '1080p']);
 
 const toAlertResponse = (alert) => ({
   id: alert.id,
@@ -327,6 +328,7 @@ const getCamerasForUser = (userId) => {
     .map(cam => ({
       socketId: cam.socketId,
       cameraName: cam.cameraName,
+      recordingQuality: cam.recordingQuality,
       recordingState: cam.recordingState,
       recordingStartedAt: cam.recordingStartedAt
     }));
@@ -346,7 +348,7 @@ io.on('connection', (socket) => {
     return;
   }
 
-  socket.on('register-device', ({ type, cameraName } = {}) => {
+  socket.on('register-device', ({ type, cameraName, recordingQuality } = {}) => {
     if (type !== 'camera' && type !== 'monitor') {
       socket.emit('app-error', 'Invalid device type');
       return;
@@ -366,6 +368,7 @@ io.on('connection', (socket) => {
         userId: finalUserId,
         cameraName: socket.cameraName,
         socketId: socket.id,
+        recordingQuality: RECORDING_QUALITIES.has(recordingQuality) ? recordingQuality : '720p',
         recordingState: 'idle',
         recordingStartedAt: null,
         recordingCommandPending: null
@@ -380,6 +383,18 @@ io.on('connection', (socket) => {
       // Send active cameras list to the newly connected monitor
       socket.emit('camera-list-update', getCamerasForUser(finalUserId));
     }
+  });
+
+  socket.on('camera:quality', ({ quality } = {}) => {
+    if (socket.deviceType !== 'camera' || !socket.userId || !RECORDING_QUALITIES.has(quality)) return;
+    const camera = activeCameras[socket.id];
+    if (!camera || camera.userId !== socket.userId) return;
+    camera.recordingQuality = quality;
+    io.to(`user_${socket.userId}`).emit('camera:quality', {
+      cameraSocketId: socket.id,
+      quality
+    });
+    io.to(`user_${socket.userId}`).emit('camera-list-update', getCamerasForUser(socket.userId));
   });
 
   // Relay WebRTC signalling messages (offer, answer, ice-candidate)

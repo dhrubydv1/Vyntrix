@@ -102,6 +102,20 @@
               <p class="control-feedback" id="camera-switch-status" role="status" aria-live="polite"></p>
             </div>
 
+            <div class="control-card recording-quality-card">
+              <div class="control-header">
+                <span>Recording Quality</span>
+                <span class="slider-val" id="recording-quality-current">720p</span>
+              </div>
+              <div class="quality-options" role="group" aria-label="Recording quality">
+                <button type="button" class="quality-button" data-recording-quality="360p" aria-pressed="false"><strong>360p</strong><span>~398 MB/hr</span></button>
+                <button type="button" class="quality-button" data-recording-quality="480p" aria-pressed="false"><strong>480p</strong><span>~570 MB/hr</span></button>
+                <button type="button" class="quality-button" data-recording-quality="720p" aria-pressed="true"><strong>720p</strong><span>~1.1 GB/hr</span></button>
+                <button type="button" class="quality-button" data-recording-quality="1080p" aria-pressed="false"><strong>1080p</strong><span>~2.1 GB/hr</span></button>
+              </div>
+              <p class="control-feedback" id="recording-quality-status" role="status" aria-live="polite">720p selected · About 1.1 GB per hour</p>
+            </div>
+
             <div class="control-card recording-card">
               <div class="control-header">
                 <span>Manual Recording</span>
@@ -199,6 +213,7 @@
     </div>
   </footer>
 
+  <script src="/js/recording-quality.js"></script>
   <script src="/js/camera.js"></script>
 </body>
 </html>

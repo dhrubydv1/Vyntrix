@@ -2,7 +2,13 @@ const { describe, it, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const express = require('express');
-const { createRecordingsRouter, safeFailureDetails } = require('../backend/recordings-api');
+const {
+  createRecordingsRouter,
+  safeFailureDetails,
+  RECORDING_STORAGE_WARNING_BYTES,
+  RECORDING_STORAGE_QUOTA_BYTES,
+  RECORDING_STORAGE_FULL_MESSAGE
+} = require('../backend/recordings-api');
 
 let database;
 let storage;
@@ -154,6 +160,14 @@ beforeEach(() => {
     async deleteRecordingForUser(userId, recordingId) {
       return recordings.find(recording => recording.userId === userId && recording.id === recordingId) || null;
     },
+    async getRecordingStorageUsage(userId) {
+      return {
+        globalUsedBytes: recordings.reduce((total, recording) => total + recording.sizeBytes, 0),
+        userUsedBytes: recordings
+        .filter(recording => recording.userId === userId)
+        .reduce((total, recording) => total + recording.sizeBytes, 0)
+      };
+    },
     async createRecording(metadata) {
       return {
         ...metadata,
@@ -199,6 +213,95 @@ describe('recordings API', () => {
     const response = await multipartRequest(recordingForm());
     assert.strictEqual(response.status, 401);
     assert.deepStrictEqual(response.body, { error: 'Unauthorized' });
+  });
+
+  it('returns normal, warning, and full storage states', async () => {
+    const usageByUser = new Map([
+      ['normal-user', RECORDING_STORAGE_WARNING_BYTES - 1],
+      ['warning-user', RECORDING_STORAGE_WARNING_BYTES],
+      ['full-user', RECORDING_STORAGE_QUOTA_BYTES]
+    ]);
+    database.getRecordingStorageUsage = async userId => ({
+      globalUsedBytes: usageByUser.get(userId) || 0,
+      userUsedBytes: 1234
+    });
+
+    const normal = await request('GET', '/api/recordings/storage', 'normal-user');
+    const warning = await request('GET', '/api/recordings/storage', 'warning-user');
+    const full = await request('GET', '/api/recordings/storage', 'full-user');
+
+    assert.strictEqual(normal.status, 200);
+    assert.strictEqual(normal.body.globalState, 'normal');
+    assert.strictEqual(warning.body.globalState, 'warning');
+    assert.strictEqual(warning.body.globalUsedBytes, RECORDING_STORAGE_WARNING_BYTES);
+    assert.strictEqual(full.body.globalState, 'full');
+    assert.strictEqual(full.body.globalQuotaBytes, RECORDING_STORAGE_QUOTA_BYTES);
+    assert.strictEqual(full.body.globalWarningBytes, RECORDING_STORAGE_WARNING_BYTES);
+    assert.strictEqual(full.body.userUsedBytes, 1234);
+  });
+
+  it('returns one shared global total while isolating personal totals by authenticated user', async () => {
+    const requestedUsers = [];
+    database.getRecordingStorageUsage = async userId => {
+      requestedUsers.push(userId);
+      return {
+        globalUsedBytes: 5120,
+        userUsedBytes: userId === 'user-a' ? 1024 : 4096
+      };
+    };
+
+    const userA = await request('GET', '/api/recordings/storage', 'user-a');
+    const userB = await request('GET', '/api/recordings/storage', 'user-b');
+
+    assert.deepStrictEqual(requestedUsers, ['user-a', 'user-b']);
+    assert.strictEqual(userA.body.globalUsedBytes, 5120);
+    assert.strictEqual(userB.body.globalUsedBytes, 5120);
+    assert.strictEqual(userA.body.userUsedBytes, 1024);
+    assert.strictEqual(userB.body.userUsedBytes, 4096);
+  });
+
+  it('rejects any user upload that would exceed the shared quota before touching R2', async () => {
+    let storageCalled = false;
+    database.getRecordingStorageUsage = async () => ({
+      globalUsedBytes: RECORDING_STORAGE_QUOTA_BYTES - VALID_WEBM.length + 1,
+      userUsedBytes: 0
+    });
+    storage.uploadRecording = async () => { storageCalled = true; };
+
+    const response = await multipartRequest(recordingForm(), 'user-b');
+
+    assert.strictEqual(response.status, 413);
+    assert.strictEqual(storageCalled, false);
+    assert.strictEqual(response.body.code, 'RECORDING_STORAGE_FULL');
+    assert.strictEqual(response.body.error, RECORDING_STORAGE_FULL_MESSAGE);
+  });
+
+  it('reserves pending upload bytes so concurrent requests cannot exceed quota', async () => {
+    database.getRecordingStorageUsage = async userId => ({
+      globalUsedBytes: RECORDING_STORAGE_QUOTA_BYTES - 60,
+      userUsedBytes: userId === 'user-a' ? 10 : 20
+    });
+    let releaseFirstUpload;
+    let signalFirstUploadStarted;
+    const firstUploadStarted = new Promise(resolve => { signalFirstUploadStarted = resolve; });
+    const holdFirstUpload = new Promise(resolve => { releaseFirstUpload = resolve; });
+    let uploadCalls = 0;
+    storage.uploadRecording = async () => {
+      uploadCalls += 1;
+      signalFirstUploadStarted();
+      await holdFirstUpload;
+    };
+
+    const firstRequest = multipartRequest(recordingForm(), 'user-a');
+    await firstUploadStarted;
+    const secondResponse = await multipartRequest(recordingForm(), 'user-b');
+    releaseFirstUpload();
+    const firstResponse = await firstRequest;
+
+    assert.strictEqual(firstResponse.status, 201);
+    assert.strictEqual(secondResponse.status, 413);
+    assert.strictEqual(secondResponse.body.code, 'RECORDING_STORAGE_FULL');
+    assert.strictEqual(uploadCalls, 1);
   });
 
   it('rejects unsupported recording MIME types', async () => {
@@ -462,6 +565,26 @@ describe('recordings API', () => {
       ['r2-delete', 'recordings/user-a/recording-a.webm'],
       ['db-delete', 'user-a', 'recording-a']
     ]);
+  });
+
+  it('reports lower storage usage after a recording is deleted', async () => {
+    let usedBytes = 4096;
+    database.getRecordingStorageUsage = async () => ({ globalUsedBytes: usedBytes, userUsedBytes: usedBytes });
+    database.getRecordingForUser = async () => recordings[0];
+    database.deleteRecordingForUser = async () => {
+      usedBytes -= recordings[0].sizeBytes;
+      return recordings[0];
+    };
+
+    const beforeDelete = await request('GET', '/api/recordings/storage', 'user-a');
+    const deletion = await request('DELETE', '/api/recordings/recording-a', 'user-a');
+    const afterDelete = await request('GET', '/api/recordings/storage', 'user-a');
+
+    assert.strictEqual(deletion.status, 200);
+    assert.strictEqual(beforeDelete.body.globalUsedBytes, 4096);
+    assert.strictEqual(beforeDelete.body.userUsedBytes, 4096);
+    assert.strictEqual(afterDelete.body.globalUsedBytes, 3072);
+    assert.strictEqual(afterDelete.body.userUsedBytes, 3072);
   });
 
   it('does not touch R2 when the recording is missing or belongs to another user', async () => {

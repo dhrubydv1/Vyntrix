@@ -1,5 +1,7 @@
 let recordings = [];
 let activePlaybackId = null;
+let recordingStorage = null;
+let recordingsUserId = null;
 const deletingRecordingIds = new Set();
 
 async function initializeRecordingsPage() {
@@ -9,6 +11,7 @@ async function initializeRecordingsPage() {
     if (session?.unavailable) showRecordingsError('Vyntrix is currently unreachable. Check your connection and try again.');
     return;
   }
+  recordingsUserId = session.user.id;
   await loadRecordings();
 }
 
@@ -21,17 +24,20 @@ async function loadRecordings() {
   renderStateCard('◌', 'Loading recordings', 'Connecting securely to your private archive.');
 
   try {
-    const response = await fetch(VyntrixConfig.apiUrl('/api/recordings'), {
-      credentials: 'include'
-    });
-    if (response.status === 401) {
+    const [response, storageResponse] = await Promise.all([
+      fetch(VyntrixConfig.apiUrl('/api/recordings'), { credentials: 'include' }),
+      fetch(VyntrixConfig.apiUrl('/api/recordings/storage'), { credentials: 'include' })
+    ]);
+    if (response.status === 401 || storageResponse.status === 401) {
       window.location.href = `/login.html?redirect=${encodeURIComponent('/recordings.html')}`;
       return;
     }
-    if (!response.ok) throw new Error('Recordings request failed');
-    const result = await response.json();
+    if (!response.ok || !storageResponse.ok) throw new Error('Recordings request failed');
+    const [result, storageResult] = await Promise.all([response.json(), storageResponse.json()]);
     recordings = Array.isArray(result.recordings) ? result.recordings : [];
+    recordingStorage = storageResult;
     activePlaybackId = null;
+    renderRecordingStorage();
     renderRecordings();
   } catch (error) {
     console.error('Could not load recordings:', error?.name || 'Error');
@@ -65,10 +71,77 @@ function renderStateCard(icon, title, description) {
 
 function showRecordingsError(message) {
   recordings = [];
+  recordingStorage = null;
   document.getElementById('recordings-count').textContent = '—';
+  renderRecordingStorage();
   document.getElementById('btn-retry-recordings').hidden = false;
   setRecordingsStatus(message, true);
   renderStateCard('!', 'Unable to load recordings', 'Your private archive was not changed.');
+}
+
+function renderRecordingStorage() {
+  const globalContainer = document.getElementById('recordings-global-storage');
+  const globalUsage = document.getElementById('recordings-global-storage-usage');
+  const globalState = document.getElementById('recordings-global-storage-state');
+  const progress = document.getElementById('recordings-global-storage-progress');
+  const personalContainer = document.getElementById('recordings-personal-storage');
+  const personalUsage = document.getElementById('recordings-personal-storage-usage');
+  const personalNotice = document.getElementById('recordings-personal-usage-notice');
+  if (!globalContainer || !globalUsage || !globalState || !progress || !personalContainer || !personalUsage || !personalNotice) return;
+  if (!recordingStorage
+    || !Number.isFinite(Number(recordingStorage.globalUsedBytes))
+    || !Number.isFinite(Number(recordingStorage.userUsedBytes))) {
+    globalContainer.dataset.state = 'error';
+    personalContainer.dataset.state = 'error';
+    globalUsage.textContent = '— / 9 GB shared';
+    globalState.textContent = 'Storage usage unavailable';
+    personalUsage.textContent = '— personal usage';
+    personalNotice.hidden = true;
+    progress.value = 0;
+    return;
+  }
+
+  const globalUsedBytes = Math.max(0, Number(recordingStorage.globalUsedBytes));
+  const userUsedBytes = Math.max(0, Number(recordingStorage.userUsedBytes));
+  const quotaBytes = Math.max(1, Number(recordingStorage.globalQuotaBytes));
+  globalUsage.textContent = `${formatStorageUsage(globalUsedBytes)} / 9 GB shared`;
+  globalContainer.dataset.state = recordingStorage.globalState;
+  globalState.textContent = recordingStorage.globalState === 'full'
+    ? 'No space available'
+    : recordingStorage.globalState === 'warning'
+      ? 'Storage almost full'
+      : 'Shared storage available';
+  progress.value = Math.min(100, (globalUsedBytes / quotaBytes) * 100);
+
+  personalContainer.dataset.state = 'normal';
+  personalUsage.textContent = `${formatStorageUsage(userUsedBytes)} personal usage`;
+  const notice = VyntrixRecordingStorage.consumePersonalUsageNotice(
+    localStorage,
+    recordingsUserId,
+    userUsedBytes
+  );
+  personalNotice.textContent = notice;
+  personalNotice.hidden = !notice;
+}
+
+function formatStorageUsage(bytes) {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes ? 1 : 0)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+async function refreshRecordingStorage() {
+  try {
+    const response = await fetch(VyntrixConfig.apiUrl('/api/recordings/storage'), {
+      credentials: 'include'
+    });
+    if (!response.ok) throw new Error('Storage request failed');
+    recordingStorage = await response.json();
+  } catch (error) {
+    console.error('Could not refresh recording storage:', error?.name || 'Error');
+    recordingStorage = null;
+  }
+  renderRecordingStorage();
 }
 
 function renderRecordings() {
@@ -191,6 +264,7 @@ async function deleteRecording(recording) {
     recordings = recordings.filter(item => item.id !== recording.id);
     deletingRecordingIds.delete(recording.id);
     renderRecordings();
+    await refreshRecordingStorage();
   } catch (error) {
     console.error('Could not delete recording:', error?.name || 'Error');
     deletingRecordingIds.delete(recording.id);
