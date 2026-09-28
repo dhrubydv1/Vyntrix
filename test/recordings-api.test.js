@@ -13,6 +13,10 @@ const VALID_WEBM = Buffer.from(
   '1a45dfa39f4286810142f7810142f2810442f381084282847765626d428781044285810218538067ff',
   'hex'
 );
+const VALID_MP4 = Buffer.from(
+  '000000186674797069736f6d0000020069736f6d6d703432000000086d646174',
+  'hex'
+);
 
 const recordings = [
   {
@@ -203,6 +207,74 @@ describe('recordings API', () => {
       type: 'text/plain'
     }), 'user-a');
     assert.strictEqual(response.status, 415);
+    assert.deepStrictEqual(response.body, { error: 'Only WebM and MP4 recordings are supported.' });
+  });
+
+  it('accepts Android text/plain WebM as canonical video/webm', async () => {
+    let uploaded;
+    let inserted;
+    storage.uploadRecording = async value => { uploaded = value; };
+    database.createRecording = async metadata => {
+      inserted = metadata;
+      return {
+        ...metadata,
+        id: 'android-webm',
+        startedAt: metadata.startedAt.toISOString(),
+        endedAt: metadata.endedAt.toISOString(),
+        createdAt: '2026-09-26T10:00:09.000Z'
+      };
+    };
+
+    const response = await multipartRequest(recordingForm({
+      bytes: VALID_WEBM,
+      type: 'text/plain'
+    }), 'user-a');
+
+    assert.strictEqual(response.status, 201);
+    assert.strictEqual(uploaded.contentType, 'video/webm');
+    assert.match(uploaded.key, /\.webm$/);
+    assert.strictEqual(inserted.contentType, 'video/webm');
+    assert.match(inserted.objectKey, /\.webm$/);
+  });
+
+  it('accepts application/octet-stream MP4 as canonical video/mp4', async () => {
+    let uploaded;
+    let inserted;
+    storage.uploadRecording = async value => { uploaded = value; };
+    database.createRecording = async metadata => {
+      inserted = metadata;
+      return {
+        ...metadata,
+        id: 'generic-mp4',
+        startedAt: metadata.startedAt.toISOString(),
+        endedAt: metadata.endedAt.toISOString(),
+        createdAt: '2026-09-26T10:00:09.000Z'
+      };
+    };
+
+    const response = await multipartRequest(recordingForm({
+      bytes: VALID_MP4,
+      type: 'application/octet-stream'
+    }), 'user-a');
+
+    assert.strictEqual(response.status, 201);
+    assert.strictEqual(uploaded.contentType, 'video/mp4');
+    assert.match(uploaded.key, /\.mp4$/);
+    assert.strictEqual(inserted.contentType, 'video/mp4');
+    assert.match(inserted.objectKey, /\.mp4$/);
+  });
+
+  it('rejects explicit video/mp4 when the bytes are valid WebM', async () => {
+    let storageCalled = false;
+    storage.uploadRecording = async () => { storageCalled = true; };
+
+    const response = await multipartRequest(recordingForm({
+      bytes: VALID_WEBM,
+      type: 'video/mp4'
+    }), 'user-a');
+
+    assert.strictEqual(response.status, 415);
+    assert.strictEqual(storageCalled, false);
     assert.deepStrictEqual(response.body, { error: 'Only WebM and MP4 recordings are supported.' });
   });
 

@@ -7,6 +7,11 @@ const RECORDING_CONTENT_TYPES = new Map([
   ['video/webm', 'webm'],
   ['video/mp4', 'mp4']
 ]);
+const GENERIC_RECORDING_CONTENT_TYPES = new Set([
+  '',
+  'text/plain',
+  'application/octet-stream'
+]);
 const RECORDING_SIGNATURE_PREFIX_BYTES = 4096;
 const RECOGNIZED_ISO_BMFF_BOX_TYPES = new Set([
   'ftyp', 'free', 'skip', 'wide', 'uuid', 'moov', 'mdat', 'styp', 'sidx', 'moof'
@@ -159,6 +164,27 @@ function hasValidRecordingSignature(buffer, contentType) {
   return hasValidMp4Signature(prefix, buffer.length);
 }
 
+function detectValidatedRecordingFormat(buffer) {
+  if (!Buffer.isBuffer(buffer)) return null;
+  const prefix = buffer.subarray(0, Math.min(buffer.length, RECORDING_SIGNATURE_PREFIX_BYTES));
+  const isWebm = hasValidWebmSignature(prefix);
+  const isMp4 = hasValidMp4Signature(prefix, buffer.length);
+  if (isWebm === isMp4) return null;
+  return isWebm
+    ? { container: 'webm', contentType: 'video/webm', extension: 'webm' }
+    : { container: 'mp4', contentType: 'video/mp4', extension: 'mp4' };
+}
+
+function resolveRecordingFormat(buffer, reportedContentType) {
+  const normalizedMimeType = normalizedContentType(reportedContentType);
+  const detected = detectValidatedRecordingFormat(buffer);
+  if (!detected) return null;
+  if (RECORDING_CONTENT_TYPES.has(normalizedMimeType)) {
+    return normalizedMimeType === detected.contentType ? detected : null;
+  }
+  return GENERIC_RECORDING_CONTENT_TYPES.has(normalizedMimeType) ? detected : null;
+}
+
 function parseRecordingTime(value) {
   if (typeof value !== 'string' || !value.trim()) return null;
   const date = new Date(value);
@@ -280,15 +306,16 @@ function createRecordingsRouter({ db, loadStorage, maxUploadBytes = 50 * 1024 * 
       return res.status(400).json({ error: 'A recording file is required.' });
     }
 
-    const contentType = normalizedContentType(file.mimetype);
-    const extension = RECORDING_CONTENT_TYPES.get(contentType);
-    if (!extension || !hasValidRecordingSignature(file.buffer, contentType)) {
+    const reportedContentType = normalizedContentType(file.mimetype);
+    const recordingFormat = resolveRecordingFormat(file.buffer, reportedContentType);
+    if (!recordingFormat) {
       console.info(
         'Recording rejected: unsupported MIME/signature',
-        recordingFormatDiagnostic(file.buffer, contentType)
+        recordingFormatDiagnostic(file.buffer, reportedContentType)
       );
       return res.status(415).json({ error: 'Only WebM and MP4 recordings are supported.' });
     }
+    const { contentType, extension } = recordingFormat;
 
     const startedAt = parseRecordingTime(req.body.startedAt);
     const endedAt = parseRecordingTime(req.body.endedAt);
@@ -441,5 +468,6 @@ module.exports = {
   toRecordingResponse,
   safeFailureDetails,
   hasValidRecordingSignature,
-  recordingFormatDiagnostic
+  recordingFormatDiagnostic,
+  resolveRecordingFormat
 };

@@ -2,7 +2,8 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   hasValidRecordingSignature,
-  recordingFormatDiagnostic
+  recordingFormatDiagnostic,
+  resolveRecordingFormat
 } = require('../backend/recordings-api');
 
 function bmffBox(type, payload = Buffer.alloc(0)) {
@@ -85,5 +86,20 @@ describe('browser recording signature validation', () => {
       detectedContainer: 'unknown'
     });
     assert.ok(!JSON.stringify(diagnostic).includes('private'));
+  });
+
+  it('allows only explicit matches or known generic browser MIME values', () => {
+    const webm = Buffer.from(
+      '1a45dfa39f4286810142f7810142f2810442f381084282847765626d428781044285810218538067ff',
+      'hex'
+    );
+
+    assert.strictEqual(resolveRecordingFormat(webm, 'text/plain').contentType, 'video/webm');
+    assert.strictEqual(resolveRecordingFormat(webm, 'application/octet-stream').contentType, 'video/webm');
+    assert.strictEqual(resolveRecordingFormat(webm, '').contentType, 'video/webm');
+    assert.strictEqual(resolveRecordingFormat(webm, 'video/webm').contentType, 'video/webm');
+    assert.strictEqual(resolveRecordingFormat(webm, 'video/mp4'), null);
+    assert.strictEqual(resolveRecordingFormat(webm, 'application/x-custom-video'), null);
+    assert.strictEqual(resolveRecordingFormat(Buffer.from('random'), 'text/plain'), null);
   });
 });
