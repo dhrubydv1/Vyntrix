@@ -19,6 +19,9 @@ let remoteRecordingTimerId = null;
 let remoteRecordingStorageState = 'unknown';
 let remoteRecordingStorageRefreshPromise = null;
 let remoteRecordingQuality = '720p';
+let remoteVideoWidth = null;
+let remoteVideoHeight = null;
+let remoteQualityChangeInProgress = false;
 let remoteVideoRotation = 0;
 let remoteOrientationLayoutFrame = null;
 let remoteStageResizeObserver = null;
@@ -109,6 +112,7 @@ function setupDOMListeners() {
     remoteStageResizeObserver.observe(remoteStage);
   }
   configureFullscreenControl();
+  updateMonitorControlAvailability();
   rotateButton.addEventListener('click', cycleRemoteVideoRotation);
 
   mirrorToggle.addEventListener('change', (event) => {
@@ -119,6 +123,10 @@ function setupDOMListeners() {
 
   document.querySelectorAll('[data-facing-mode]').forEach((button) => {
     button.addEventListener('click', () => requestRemoteCameraSwitch(button.dataset.facingMode));
+  });
+
+  document.querySelectorAll('[data-remote-quality]').forEach((button) => {
+    button.addEventListener('click', () => requestRemoteQualityChange(button.dataset.remoteQuality));
   });
 
   zoomSlider.addEventListener('input', (e) => {
@@ -148,12 +156,14 @@ function setupDOMListeners() {
   // mouse/touch events on hybrid devices.
   const startTalking = (e) => {
     e.preventDefault();
-    if (!micTrack) {
+    if (!micTrack || pttButton.disabled || peerConnection?.connectionState !== 'connected') {
       console.warn('Microphone track is not active or authorized.');
+      updateTalkStatus('Talk is available after the live connection and microphone are ready.', true);
       return;
     }
     pttButton.classList.add('active');
     micTrack.enabled = true; // Unmute mic track
+    updateTalkStatus('Speaking to camera…');
     console.log('PTT: Microphone unmuted');
   };
 
@@ -165,6 +175,7 @@ function setupDOMListeners() {
       if (micTrack) {
         micTrack.enabled = false; // Mute mic track
       }
+      updateTalkStatus('Hold to speak.');
       console.log('PTT: Microphone muted');
     }
   };
@@ -300,14 +311,8 @@ function monitorIsFullscreen() {
 
 function configureFullscreenControl() {
   const button = document.getElementById('btn-toggle-fullscreen');
-  const stage = document.getElementById('remote-video-stage');
-  const videoEl = document.getElementById('remote-video');
-  const supported = Boolean(
-    stage?.requestFullscreen
-    || stage?.webkitRequestFullscreen
-    || videoEl?.webkitEnterFullscreen
-  );
-  button.disabled = !supported;
+  const supported = fullscreenSupported();
+  button.disabled = true;
   if (!supported) button.title = 'Full screen is not supported by this browser';
 }
 
@@ -370,21 +375,88 @@ function applyRemoteMirror(mirrored) {
   document.getElementById('remote-video')?.classList.toggle('video-mirrored', mirrored);
 }
 
-function updateRemoteFacingControls(facingMode = null, disabled = false) {
-  if (VALID_FACING_MODES.has(facingMode)) remoteFacingMode = facingMode;
-  const recordingBlocksSwitch = remoteRecordingState === 'recording' || remoteRecordingState === 'uploading';
-  document.querySelectorAll('[data-facing-mode]').forEach((button) => {
-    button.setAttribute('aria-pressed', String(button.dataset.facingMode === remoteFacingMode));
-    button.disabled = disabled || recordingBlocksSwitch;
-  });
+function fullscreenSupported() {
+  const stage = document.getElementById('remote-video-stage');
+  const videoEl = document.getElementById('remote-video');
+  return Boolean(stage?.requestFullscreen || stage?.webkitRequestFullscreen || videoEl?.webkitEnterFullscreen);
 }
 
-function updateRemoteRecordingQuality(quality = '720p') {
+function updateTalkStatus(message, isError = false) {
+  const status = document.getElementById('talk-status');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('is-error', isError);
+}
+
+function updateMonitorControlAvailability() {
+  const cameraAvailable = Boolean(socket?.connected && activeCameraSocketId);
+  const videoEl = document.getElementById('remote-video');
+  const viewAvailable = cameraAvailable && Boolean(videoEl?.srcObject);
+  const recordingBlocksCameraChanges = remoteRecordingState === 'recording'
+    || remoteRecordingState === 'uploading';
+
+  document.querySelectorAll('[data-facing-mode]').forEach((button) => {
+    button.disabled = !cameraAvailable || remoteCameraSwitchInProgress || recordingBlocksCameraChanges;
+  });
+  document.querySelectorAll('[data-remote-quality]').forEach((button) => {
+    button.disabled = !cameraAvailable || remoteQualityChangeInProgress || recordingBlocksCameraChanges;
+  });
+
+  const mirror = document.getElementById('toggle-mirror-view');
+  const rotate = document.getElementById('btn-rotate-view');
+  const zoom = document.getElementById('control-zoom');
+  const nightVision = document.getElementById('control-nightvision');
+  const fullscreen = document.getElementById('btn-toggle-fullscreen');
+  if (mirror) mirror.disabled = !viewAvailable;
+  if (rotate) rotate.disabled = !viewAvailable;
+  if (zoom) zoom.disabled = !viewAvailable;
+  if (nightVision) nightVision.disabled = !viewAvailable;
+  if (fullscreen) fullscreen.disabled = !viewAvailable || !fullscreenSupported();
+
+  const talk = document.getElementById('btn-ptt');
+  const talkAvailable = viewAvailable && peerConnection?.connectionState === 'connected'
+    && micTrack?.readyState === 'live';
+  if (talk) talk.disabled = !talkAvailable;
+  if (!cameraAvailable) updateTalkStatus('Connect to a camera to talk.');
+  else if (!micTrack) updateTalkStatus('Microphone access is required to talk.', true);
+  else if (!talkAvailable) updateTalkStatus('Talk will be available when the live connection is ready.');
+  else if (!talk?.classList.contains('active')) updateTalkStatus('Hold to speak.');
+}
+
+function updateRemoteFacingControls(facingMode = null, disabled = false) {
+  if (VALID_FACING_MODES.has(facingMode)) remoteFacingMode = facingMode;
+  document.querySelectorAll('[data-facing-mode]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.facingMode === remoteFacingMode));
+  });
+  remoteCameraSwitchInProgress = disabled;
+  updateMonitorControlAvailability();
+}
+
+function updateRemoteRecordingQuality(quality = '720p', width = null, height = null, message = '', isError = false) {
   remoteRecordingQuality = VyntrixRecordingQuality.normalizeQuality(quality);
+  remoteVideoWidth = Number.isSafeInteger(width) && width > 0 ? width : remoteVideoWidth;
+  remoteVideoHeight = Number.isSafeInteger(height) && height > 0 ? height : remoteVideoHeight;
   const qualityElement = document.getElementById('remote-recording-quality');
+  const resolutionElement = document.getElementById('remote-stream-resolution');
+  const status = document.getElementById('remote-quality-status');
   const estimate = document.getElementById('remote-recording-quality-estimate');
   if (qualityElement) qualityElement.textContent = remoteRecordingQuality;
+  if (resolutionElement) {
+    resolutionElement.textContent = remoteVideoWidth && remoteVideoHeight
+      ? `${remoteVideoWidth} × ${remoteVideoHeight}`
+      : 'Resolution unavailable';
+  }
+  document.querySelectorAll('[data-remote-quality]').forEach((button) => {
+    button.setAttribute('aria-pressed', String(button.dataset.remoteQuality === remoteRecordingQuality));
+  });
+  if (status) {
+    status.textContent = message || (remoteVideoWidth && remoteVideoHeight
+      ? `${remoteVideoWidth} × ${remoteVideoHeight} active`
+      : 'Waiting for the camera to report its resolution.');
+    status.classList.toggle('is-error', isError);
+  }
   if (estimate) estimate.textContent = `${VyntrixRecordingQuality.estimateLabel(remoteRecordingQuality)} on the camera device`;
+  updateMonitorControlAvailability();
 }
 
 function formatRemoteRecordingElapsed(totalSeconds) {
@@ -554,6 +626,61 @@ async function requestRemoteRecordingControl(action) {
   });
 }
 
+function requestRemoteQualityChange(quality) {
+  const normalized = VyntrixRecordingQuality.normalizeQuality(quality);
+  if (normalized !== quality || remoteQualityChangeInProgress) return;
+  if (remoteRecordingState === 'recording' || remoteRecordingState === 'uploading') {
+    updateRemoteRecordingQuality(
+      remoteRecordingQuality,
+      remoteVideoWidth,
+      remoteVideoHeight,
+      'Stop the current recording before changing quality.',
+      true
+    );
+    return;
+  }
+  if (!socket?.connected || !activeCameraSocketId) {
+    updateRemoteRecordingQuality(
+      remoteRecordingQuality,
+      remoteVideoWidth,
+      remoteVideoHeight,
+      'Connect to a camera before changing quality.',
+      true
+    );
+    return;
+  }
+
+  remoteQualityChangeInProgress = true;
+  updateRemoteRecordingQuality(
+    remoteRecordingQuality,
+    remoteVideoWidth,
+    remoteVideoHeight,
+    `Requesting ${normalized}…`
+  );
+  socket.timeout(12000).emit('camera:quality:set', {
+    targetSocketId: activeCameraSocketId,
+    quality: normalized
+  }, (timeoutError, response) => {
+    remoteQualityChangeInProgress = false;
+    if (timeoutError || !response?.success) {
+      updateRemoteRecordingQuality(
+        remoteRecordingQuality,
+        remoteVideoWidth,
+        remoteVideoHeight,
+        response?.message || 'The camera did not respond. Try again.',
+        true
+      );
+      return;
+    }
+    updateRemoteRecordingQuality(
+      response.quality,
+      response.width,
+      response.height,
+      response.message || `${response.width} × ${response.height} applied.`
+    );
+  });
+}
+
 function showRemoteCameraSwitchStatus(message = '', isError = false) {
   const status = document.getElementById('remote-camera-switch-status');
   if (!status) return;
@@ -583,6 +710,9 @@ function requestRemoteCameraSwitch(facingMode) {
     const response = timeoutError ? null : result;
     if (response?.success) {
       updateRemoteFacingControls(response.facingMode || facingMode);
+      if (response.quality && response.width && response.height) {
+        updateRemoteRecordingQuality(response.quality, response.width, response.height);
+      }
       showRemoteCameraSwitchStatus(response.message || 'Camera switched.');
       updateRemoteVideoLayout();
       return;
@@ -640,7 +770,14 @@ function connectSocket() {
     updateCameraNetworkState(availableCameras.length ? `${availableCameras.length} camera${availableCameras.length === 1 ? '' : 's'} online` : 'No cameras are currently online.');
     renderCameraSelectionGrid(availableCameras);
     const selectedCamera = availableCameras.find(camera => camera.socketId === activeCameraSocketId);
-    if (selectedCamera?.recordingQuality) updateRemoteRecordingQuality(selectedCamera.recordingQuality);
+    if (selectedCamera?.recordingQuality) {
+      updateRemoteRecordingQuality(
+        selectedCamera.recordingQuality,
+        selectedCamera.videoWidth,
+        selectedCamera.videoHeight
+      );
+    }
+    if (selectedCamera?.facingMode) updateRemoteFacingControls(selectedCamera.facingMode);
     if (selectedCamera?.recordingState) {
       applyRemoteRecordingState({
         state: selectedCamera.recordingState,
@@ -661,7 +798,12 @@ function connectSocket() {
 
   socket.on('camera:quality', (qualityUpdate) => {
     if (qualityUpdate?.cameraSocketId !== activeCameraSocketId) return;
-    updateRemoteRecordingQuality(qualityUpdate.quality);
+    updateRemoteRecordingQuality(
+      qualityUpdate.quality,
+      qualityUpdate.width,
+      qualityUpdate.height,
+      qualityUpdate.message || ''
+    );
   });
 
   // Signal feedback from camera
@@ -758,6 +900,7 @@ function renderCameraSelectionGrid(cameras, state = 'ready') {
     if (activeCameraSocketId) {
       cleanupPeerConnection();
       activeCameraSocketId = null;
+      updateMonitorControlAvailability();
       document.getElementById('monitor-portal-view').style.display = 'none';
       document.getElementById('camera-selection-view').style.display = 'block';
       updateMonitorStatus('disconnected');
@@ -810,6 +953,7 @@ function updateMonitorStatus(status) {
   else indicator.classList.add('idle');
   text.innerText = labels[status] || 'DISCONNECTED';
   updateMonitorVideoState(status);
+  updateMonitorControlAvailability();
 }
 
 function cleanupPeerConnection() {
@@ -830,6 +974,7 @@ function cleanupPeerConnection() {
   const videoEl = document.getElementById('remote-video');
   if (videoEl) videoEl.srcObject = null;
   resetRemoteVideoLayout();
+  updateMonitorControlAvailability();
 }
 
 function reconnectToSelectedCamera() {
@@ -847,7 +992,7 @@ function reconnectToSelectedCamera() {
 async function ensureMicrophoneTrack() {
   const pttButton = document.getElementById('btn-ptt');
   if (micTrack?.readyState === 'live' && micStream) {
-    pttButton.disabled = false;
+    updateMonitorControlAvailability();
     return micTrack;
   }
   micStream?.getTracks().forEach(track => track.stop());
@@ -858,12 +1003,14 @@ async function ensureMicrophoneTrack() {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     micTrack = micStream.getAudioTracks()[0] || null;
     if (micTrack) micTrack.enabled = false;
-    pttButton.disabled = !micTrack;
     pttButton.title = micTrack ? '' : 'Microphone is unavailable';
+    updateTalkStatus(micTrack ? 'Talk will be available when the live connection is ready.' : 'No microphone is available.', !micTrack);
   } catch (err) {
     console.warn('Microphone permission denied. Walkie-Talkie feature disabled:', err);
     pttButton.title = 'Allow microphone access to use Talk';
+    updateTalkStatus('Microphone permission was not granted.', true);
   }
+  updateMonitorControlAvailability();
   return micTrack;
 }
 
@@ -879,10 +1026,13 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
   const attempt = ++monitorConnectionAttempt;
   activeCameraSocketId = socketId;
   activeCameraName = name;
+  const selectedCamera = availableCameras.find(camera => camera.socketId === socketId);
   updateRemoteRecordingQuality(
-    availableCameras.find(camera => camera.socketId === socketId)?.recordingQuality || '720p'
+    selectedCamera?.recordingQuality || '720p',
+    selectedCamera?.videoWidth || null,
+    selectedCamera?.videoHeight || null
   );
-  remoteFacingMode = null;
+  remoteFacingMode = VALID_FACING_MODES.has(selectedCamera?.facingMode) ? selectedCamera.facingMode : null;
   if (cameraChanged) setRemoteVideoRotation(0);
   updateMonitorStatus(isReconnect ? 'reconnecting' : 'connecting');
 
@@ -939,6 +1089,7 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
     if (event.track.kind === 'video') {
       videoEl.srcObject = event.streams[0];
       updateRemoteVideoLayout();
+      updateMonitorControlAvailability();
     }
   };
 
@@ -993,8 +1144,12 @@ function backToCameraList() {
   exitMonitorFullscreen();
   remoteCameraSwitchInProgress = false;
   remoteRecordingCommandInProgress = false;
+  remoteQualityChangeInProgress = false;
   remoteFacingMode = null;
+  remoteVideoWidth = null;
+  remoteVideoHeight = null;
   updateRemoteFacingControls();
+  updateRemoteRecordingQuality(remoteRecordingQuality, null, null, 'Connect to a camera to change quality.');
   showRemoteCameraSwitchStatus();
   applyRemoteRecordingState({ state: 'idle' });
   setRemoteVideoRotation(0);

@@ -312,6 +312,8 @@ app.use('/api/recordings', (req, res, next) => {
 const activeCameras = {}; // socket.id -> camera registration and recording state
 const RECORDING_STATES = new Set(['idle', 'recording', 'uploading', 'uploaded', 'error']);
 const RECORDING_QUALITIES = new Set(['360p', '480p', '720p', '1080p']);
+const VALID_FACING_MODES = new Set(['user', 'environment']);
+const isVideoDimension = (value) => Number.isSafeInteger(value) && value > 0 && value <= 16384;
 
 const toAlertResponse = (alert) => ({
   id: alert.id,
@@ -329,6 +331,9 @@ const getCamerasForUser = (userId) => {
       socketId: cam.socketId,
       cameraName: cam.cameraName,
       recordingQuality: cam.recordingQuality,
+      videoWidth: cam.videoWidth,
+      videoHeight: cam.videoHeight,
+      facingMode: cam.facingMode,
       recordingState: cam.recordingState,
       recordingStartedAt: cam.recordingStartedAt
     }));
@@ -348,7 +353,14 @@ io.on('connection', (socket) => {
     return;
   }
 
-  socket.on('register-device', ({ type, cameraName, recordingQuality } = {}) => {
+  socket.on('register-device', ({
+    type,
+    cameraName,
+    recordingQuality,
+    videoWidth,
+    videoHeight,
+    facingMode
+  } = {}) => {
     if (type !== 'camera' && type !== 'monitor') {
       socket.emit('app-error', 'Invalid device type');
       return;
@@ -369,9 +381,13 @@ io.on('connection', (socket) => {
         cameraName: socket.cameraName,
         socketId: socket.id,
         recordingQuality: RECORDING_QUALITIES.has(recordingQuality) ? recordingQuality : '720p',
+        videoWidth: isVideoDimension(videoWidth) ? videoWidth : null,
+        videoHeight: isVideoDimension(videoHeight) ? videoHeight : null,
+        facingMode: VALID_FACING_MODES.has(facingMode) ? facingMode : null,
         recordingState: 'idle',
         recordingStartedAt: null,
-        recordingCommandPending: null
+        recordingCommandPending: null,
+        qualityCommandPending: false
       };
       console.log('Camera registered.');
       
@@ -385,16 +401,81 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('camera:quality', ({ quality } = {}) => {
+  socket.on('camera:quality', ({ quality, width, height } = {}) => {
     if (socket.deviceType !== 'camera' || !socket.userId || !RECORDING_QUALITIES.has(quality)) return;
     const camera = activeCameras[socket.id];
     if (!camera || camera.userId !== socket.userId) return;
     camera.recordingQuality = quality;
+    if (isVideoDimension(width) && isVideoDimension(height)) {
+      camera.videoWidth = width;
+      camera.videoHeight = height;
+    }
     io.to(`user_${socket.userId}`).emit('camera:quality', {
       cameraSocketId: socket.id,
-      quality
+      quality,
+      ...(isVideoDimension(width) && isVideoDimension(height) ? { width, height } : {})
     });
     io.to(`user_${socket.userId}`).emit('camera-list-update', getCamerasForUser(socket.userId));
+  });
+
+  socket.on('camera:quality:set', ({ targetSocketId, quality } = {}, acknowledge) => {
+    const reply = typeof acknowledge === 'function' ? acknowledge : () => {};
+    if (!socket.userId || socket.deviceType !== 'monitor') {
+      reply({ success: false, message: 'Only an authenticated monitor can change camera quality.' });
+      return;
+    }
+    if (!targetSocketId || !RECORDING_QUALITIES.has(quality)) {
+      reply({ success: false, message: 'Choose a supported camera quality.' });
+      return;
+    }
+
+    const camera = activeCameras[targetSocketId];
+    const targetSocket = io.sockets.sockets.get(targetSocketId);
+    if (!camera || camera.userId !== socket.userId || !targetSocket
+      || targetSocket.userId !== socket.userId || targetSocket.deviceType !== 'camera') {
+      reply({ success: false, message: 'That camera is unavailable.' });
+      return;
+    }
+    if (camera.recordingState === 'recording' || camera.recordingState === 'uploading') {
+      reply({ success: false, message: 'Stop the current recording before changing quality.' });
+      return;
+    }
+    if (camera.qualityCommandPending) {
+      reply({ success: false, message: 'A quality change is already in progress.' });
+      return;
+    }
+
+    camera.qualityCommandPending = true;
+    targetSocket.timeout(12000).emit('camera:quality:set', { quality }, (error, result) => {
+      camera.qualityCommandPending = false;
+      if (error) {
+        reply({ success: false, message: 'The camera did not respond. Try again.' });
+        return;
+      }
+      if (!result || result.success !== true || !RECORDING_QUALITIES.has(result.quality)
+        || !isVideoDimension(result.width) || !isVideoDimension(result.height)) {
+        reply({
+          success: false,
+          message: result?.message || 'The camera could not confirm the applied resolution.'
+        });
+        return;
+      }
+
+      camera.recordingQuality = result.quality;
+      camera.videoWidth = result.width;
+      camera.videoHeight = result.height;
+      const response = {
+        success: true,
+        cameraSocketId: targetSocketId,
+        quality: result.quality,
+        width: result.width,
+        height: result.height,
+        message: typeof result.message === 'string' ? result.message.slice(0, 160) : ''
+      };
+      io.to(`user_${socket.userId}`).emit('camera:quality', response);
+      io.to(`user_${socket.userId}`).emit('camera-list-update', getCamerasForUser(socket.userId));
+      reply(response);
+    });
   });
 
   // Relay WebRTC signalling messages (offer, answer, ice-candidate)
@@ -453,9 +534,20 @@ io.on('connection', (socket) => {
         reply({ success: false, message: 'The camera did not respond. Try again.' });
         return;
       }
-      reply(result && typeof result.success === 'boolean'
-        ? result
-        : { success: false, message: 'The camera returned an invalid response.' });
+      if (!result || typeof result.success !== 'boolean') {
+        reply({ success: false, message: 'The camera returned an invalid response.' });
+        return;
+      }
+      if (result.success) {
+        if (VALID_FACING_MODES.has(result.facingMode)) camera.facingMode = result.facingMode;
+        if (RECORDING_QUALITIES.has(result.quality)) camera.recordingQuality = result.quality;
+        if (isVideoDimension(result.width) && isVideoDimension(result.height)) {
+          camera.videoWidth = result.width;
+          camera.videoHeight = result.height;
+        }
+        io.to(`user_${socket.userId}`).emit('camera-list-update', getCamerasForUser(socket.userId));
+      }
+      reply(result);
     });
   });
 

@@ -258,7 +258,7 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     assert.deepStrictEqual(camerasForB.map(camera => camera.cameraName), ['User B Camera']);
   });
 
-  it('blocks cross-user signaling, siren, camera-switch, and recording commands', async () => {
+  it('blocks cross-user signaling, siren, camera-switch, quality, and recording commands', async () => {
     const userA = await register(`socket_command_a_${Date.now()}`);
     const userB = await register(`socket_command_b_${Date.now()}`);
     const monitorA = await connectSocket(userA.cookie);
@@ -269,10 +269,12 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     let receivedSignal = false;
     let receivedSiren = false;
     let receivedCameraSwitch = false;
+    let receivedQualityChange = false;
     let receivedRecordingCommand = false;
     cameraB.on('webrtc-signal', () => { receivedSignal = true; });
     cameraB.on('trigger-siren', () => { receivedSiren = true; });
     cameraB.on('camera:switch', () => { receivedCameraSwitch = true; });
+    cameraB.on('camera:quality:set', () => { receivedQualityChange = true; });
     cameraB.on('recording:control', () => { receivedRecordingCommand = true; });
 
     monitorA.emit('webrtc-signal', {
@@ -291,13 +293,19 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
       targetSocketId: cameraB.id,
       action: 'start'
     });
+    const qualityResult = await emitWithAck(monitorA, 'camera:quality:set', {
+      targetSocketId: cameraB.id,
+      quality: '720p'
+    });
 
     await new Promise(resolve => setTimeout(resolve, 150));
     assert.strictEqual(receivedSignal, false);
     assert.strictEqual(receivedSiren, false);
     assert.strictEqual(receivedCameraSwitch, false);
+    assert.strictEqual(receivedQualityChange, false);
     assert.strictEqual(receivedRecordingCommand, false);
     assert.strictEqual(switchResult.success, false);
+    assert.strictEqual(qualityResult.success, false);
     assert.strictEqual(recordingResult.success, false);
   });
 
@@ -360,7 +368,7 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     assert.strictEqual(started.cameraSocketId, camera.id);
   });
 
-  it('syncs validated camera recording quality to the owner monitor only', async () => {
+  it('syncs validated camera quality and forwards owner-authorized remote changes', async () => {
     const user = await register(`socket_quality_${Date.now()}`);
     const camera = await connectSocket(user.cookie);
     const monitor = await connectSocket(user.cookie);
@@ -377,6 +385,46 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     const confirmingMonitor = await connectSocket(user.cookie);
     const cameras = await registerDevice(confirmingMonitor, 'monitor');
     assert.strictEqual(cameras[0].recordingQuality, '1080p');
+    let requestedQuality = null;
+
+    camera.on('camera:quality:set', ({ quality }, acknowledge) => {
+      requestedQuality = quality;
+      acknowledge({
+        success: true,
+        quality: '480p',
+        width: 854,
+        height: 480,
+        message: '854 × 480 applied.'
+      });
+    });
+
+    const result = await emitWithAck(monitor, 'camera:quality:set', {
+      targetSocketId: camera.id,
+      quality: '480p'
+    });
+
+    assert.strictEqual(requestedQuality, '480p');
+    assert.deepStrictEqual(result, {
+      success: true,
+      cameraSocketId: camera.id,
+      quality: '480p',
+      width: 854,
+      height: 480,
+      message: '854 × 480 applied.'
+    });
+
+    const finalMonitor = await connectSocket(user.cookie);
+    const finalCameras = await registerDevice(finalMonitor, 'monitor');
+    assert.strictEqual(finalCameras[0].recordingQuality, '480p');
+    assert.strictEqual(finalCameras[0].videoWidth, 854);
+    assert.strictEqual(finalCameras[0].videoHeight, 480);
+
+    const unsupported = await emitWithAck(monitor, 'camera:quality:set', {
+      targetSocketId: camera.id,
+      quality: '4k'
+    });
+    assert.strictEqual(unsupported.success, false);
+    assert.match(unsupported.message, /supported camera quality/i);
   });
 
   it('rejects duplicate remote recording commands while one is pending', async () => {

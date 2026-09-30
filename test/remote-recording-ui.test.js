@@ -41,4 +41,25 @@ describe('remote recording frontend wiring', () => {
     assert.match(cameraScript, /\/api\/recordings\/storage/);
     assert.match(cameraScript, /No space available\. Delete old recordings to continue\./);
   });
+
+  it('wires every Web Monitor control to real monitor or camera behavior', () => {
+    assert.match(monitorHtml, /data-remote-quality="360p"/);
+    assert.match(monitorHtml, /data-remote-quality="480p"/);
+    assert.match(monitorHtml, /data-remote-quality="720p"/);
+    assert.match(monitorHtml, /data-remote-quality="1080p"/);
+    assert.match(monitorHtml, /id="remote-stream-resolution"/);
+    assert.match(monitorHtml, /id="remote-quality-status"/);
+    assert.match(monitorHtml, /id="talk-status"/);
+    assert.match(monitorScript, /requestRemoteQualityChange/);
+    assert.match(monitorScript, /emit\('camera:quality:set'/);
+    assert.match(monitorScript, /requestRemoteCameraSwitch/);
+    assert.match(monitorScript, /applyRemoteMirror/);
+    assert.match(monitorScript, /cycleRemoteVideoRotation/);
+    assert.match(monitorScript, /--video-zoom/);
+    assert.match(monitorScript, /night-vision-mode/);
+    assert.match(monitorScript, /micTrack\.enabled = true/);
+    assert.match(cameraScript, /on\('camera:quality:set'/);
+    assert.match(cameraScript, /track\?\.getSettings/);
+    assert.doesNotMatch(monitorScript, /new RTCPeerConnection[\s\S]*requestRemoteQualityChange/);
+  });
 });

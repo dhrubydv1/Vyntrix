@@ -341,6 +341,11 @@ function syncActiveRecordingQuality(track, fallback = requestedRecordingQuality)
     fallback
   );
   updateRecordingQualityControls();
+  return {
+    quality: activeRecordingQuality,
+    width: Number.isFinite(settings.width) ? Math.round(settings.width) : null,
+    height: Number.isFinite(settings.height) ? Math.round(settings.height) : null
+  };
 }
 
 async function selectRecordingQuality(quality) {
@@ -355,7 +360,13 @@ async function selectRecordingQuality(quality) {
     requestedRecordingQuality = VyntrixRecordingQuality.writeQualityPreference(localStorage, userId, normalized);
     activeRecordingQuality = requestedRecordingQuality;
     updateRecordingQualityControls();
-    return true;
+    return {
+      success: true,
+      quality: activeRecordingQuality,
+      width: null,
+      height: null,
+      message: `${activeRecordingQuality} selected for camera startup.`
+    };
   }
 
   const previousRequested = requestedRecordingQuality;
@@ -403,18 +414,27 @@ async function selectRecordingQuality(quality) {
     }
 
     requestedRecordingQuality = VyntrixRecordingQuality.writeQualityPreference(localStorage, userId, normalized);
-    syncActiveRecordingQuality(track, appliedQuality);
+    const appliedState = syncActiveRecordingQuality(track, appliedQuality);
+    const actualResolution = appliedState.width && appliedState.height
+      ? `${appliedState.width} × ${appliedState.height}`
+      : appliedState.quality;
+    let message = `${actualResolution} applied.`;
     if (activeRecordingQuality !== normalized) {
-      updateRecordingQualityControls(`${activeRecordingQuality} is the nearest quality available on this camera.`);
+      message = `${actualResolution} is the nearest resolution available on this camera.`;
+      updateRecordingQualityControls(message);
+    } else {
+      updateRecordingQualityControls(message);
     }
     publishCameraQuality();
-    return true;
+    return { success: true, ...appliedState, message };
   } catch (error) {
     requestedRecordingQuality = previousRequested;
     activeRecordingQuality = previousActive;
     console.warn('Recording quality could not be applied:', error?.name || 'Error');
-    updateRecordingQualityControls('This camera could not apply that quality. The previous quality is still active.', true);
-    return false;
+    const message = 'This camera could not apply that quality. The previous quality is still active.';
+    updateRecordingQualityControls(message, true);
+    const previousState = syncActiveRecordingQuality(track, previousActive);
+    return { success: false, ...previousState, message };
   } finally {
     qualityChangeInProgress = false;
     updateRecordingQualityControls(
@@ -425,7 +445,12 @@ async function selectRecordingQuality(quality) {
 }
 
 function publishCameraQuality() {
-  if (socket?.connected) socket.emit('camera:quality', { quality: activeRecordingQuality });
+  if (!socket?.connected) return;
+  const state = syncActiveRecordingQuality(localStream?.getVideoTracks?.()[0], activeRecordingQuality);
+  socket.emit('camera:quality', {
+    quality: state.quality,
+    ...(state.width && state.height ? { width: state.width, height: state.height } : {})
+  });
 }
 
 function applyRecordingStorageState(storage) {
@@ -1041,7 +1066,13 @@ async function switchCamera(facingMode) {
     showCameraSwitchStatus(`${facingLabel(activeFacingMode)} camera active.`);
     updateCameraStatus('streaming');
     await refreshVideoInputDevices();
-    return { success: true, facingMode: activeFacingMode, message: `${facingLabel(activeFacingMode)} camera active.` };
+    const appliedState = syncActiveRecordingQuality(newVideoTrack, activeRecordingQuality);
+    return {
+      success: true,
+      facingMode: activeFacingMode,
+      ...appliedState,
+      message: `${facingLabel(activeFacingMode)} camera active.`
+    };
   } catch (error) {
     console.warn(`Could not switch to ${facingMode} camera:`, error?.name || 'Error', error?.message || 'Unknown error');
     newVideoTrack?.stop();
@@ -1172,10 +1203,17 @@ function connectSocket() {
   
   signalingSocket.on('connect', () => {
     console.log('Connected to signaling server');
+    const activeVideoState = syncActiveRecordingQuality(
+      localStream?.getVideoTracks?.()[0],
+      activeRecordingQuality
+    );
     signalingSocket.emit('register-device', {
       type: 'camera',
       cameraName,
-      recordingQuality: activeRecordingQuality
+      recordingQuality: activeVideoState.quality,
+      videoWidth: activeVideoState.width,
+      videoHeight: activeVideoState.height,
+      facingMode: activeFacingMode
     });
     publishRecordingState(recordingPublicState, recordingPublicMessage);
     if (isStreaming) {
@@ -1243,6 +1281,11 @@ function connectSocket() {
 
   socket.on('camera:switch', async ({ facingMode } = {}, acknowledge) => {
     const result = await switchCamera(facingMode);
+    if (typeof acknowledge === 'function') acknowledge(result);
+  });
+
+  socket.on('camera:quality:set', async ({ quality } = {}, acknowledge) => {
+    const result = await selectRecordingQuality(quality);
     if (typeof acknowledge === 'function') acknowledge(result);
   });
 

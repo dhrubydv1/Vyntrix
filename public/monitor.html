@@ -55,146 +55,119 @@
       </div>
 
       <!-- Live Monitoring Layout (hidden by default) -->
-      <div id="monitor-portal-view" class="portal-layout monitor-layout" style="display: none;">
-        
-        <!-- Live stream console -->
-        <div class="stream-card monitor-stream-card">
-          <div class="stream-title-bar monitor-title-bar">
-            <div class="monitor-heading-group">
-              <button class="btn btn-secondary back-button" id="btn-back-to-list">
-                ← Back to List
-              </button>
-              <div class="monitor-title-copy">
-                <span class="page-eyebrow">Live camera</span>
-                <h2 id="active-camera-title">Living Room Camera</h2>
-                <p>Secure real-time view and camera controls</p>
-              </div>
+      <div id="monitor-portal-view" class="monitor-layout" style="display: none;">
+        <div class="monitor-workspace">
+          <div class="monitor-title-bar">
+            <button class="monitor-back-button" id="btn-back-to-list" type="button" aria-label="Back to camera list">←</button>
+            <div class="monitor-title-copy">
+              <span class="monitor-kicker">Live camera</span>
+              <h1 id="active-camera-title">Living Room Camera</h1>
             </div>
-            <div class="stream-status" role="status" aria-live="polite">
-              <div class="status-indicator status-disconnected idle"></div>
-              <span id="monitor-connection-status">DISCONNECTED</span>
+            <div class="monitor-live-meta">
+              <div class="stream-status" role="status" aria-live="polite">
+                <div class="status-indicator status-disconnected idle"></div>
+                <span id="monitor-connection-status">DISCONNECTED</span>
+              </div>
+              <span class="monitor-resolution" id="remote-stream-resolution">Resolution unavailable</span>
             </div>
           </div>
 
           <div class="video-container monitor-video-container" id="remote-video-stage">
-            <!-- Dynamic styling hook for filters and zoom -->
             <div id="video-wrapper" class="video-wrapper">
               <video class="video-element" id="remote-video" autoplay playsinline aria-label="Remote camera feed"></video>
             </div>
-            <div class="overlay-scanline"></div>
             <div class="overlay-timestamp" id="monitor-time">--:--:--</div>
-            <div class="overlay-rec">
-              <div class="rec-dot"></div>
-              MONITORING
-            </div>
-            <button type="button" class="fullscreen-toggle" id="btn-toggle-fullscreen" aria-label="Enter full screen" aria-pressed="false">
-              <span aria-hidden="true" id="fullscreen-icon">⛶</span>
-              <span id="fullscreen-label">Full Screen</span>
-            </button>
             <div class="video-state-overlay" id="monitor-video-state" role="status" aria-live="polite">Connecting to camera…</div>
           </div>
 
-          <!-- Dash Control panel -->
           <section class="monitor-controls-panel" aria-labelledby="monitor-controls-title">
-            <div class="monitor-controls-heading">
-              <div>
-                <span class="page-eyebrow">Camera workspace</span>
-                <h3 id="monitor-controls-title">View and recording controls</h3>
-              </div>
-              <span>Connected camera controls</span>
-            </div>
-          <div class="controls-grid monitor-controls-grid">
-            <div class="control-card monitor-control-card">
-              <div class="control-header">
-                <span>Camera</span>
-              </div>
+            <h2 class="visually-hidden" id="monitor-controls-title">Camera controls</h2>
+            <div class="monitor-toolbar">
+              <div class="monitor-tool-group monitor-camera-group">
+                <span class="monitor-tool-label">Camera</span>
               <div class="segmented-control" role="group" aria-label="Remote camera facing direction">
-                <button type="button" class="segment-button" id="remote-camera-facing-user" data-facing-mode="user" aria-pressed="false">Front</button>
-                <button type="button" class="segment-button" id="remote-camera-facing-environment" data-facing-mode="environment" aria-pressed="false">Back</button>
+                  <button type="button" class="segment-button" id="remote-camera-facing-user" data-facing-mode="user" aria-pressed="false" disabled>Front</button>
+                  <button type="button" class="segment-button" id="remote-camera-facing-environment" data-facing-mode="environment" aria-pressed="false" disabled>Back</button>
+                </div>
+                <p class="control-feedback" id="remote-camera-switch-status" role="status" aria-live="polite"></p>
               </div>
-              <p class="control-feedback" id="remote-camera-switch-status" role="status" aria-live="polite"></p>
+
+              <div class="monitor-tool-group monitor-quality-group">
+                <div class="monitor-tool-heading">
+                  <span class="monitor-tool-label">Quality</span>
+                  <strong id="remote-recording-quality">720p</strong>
+                </div>
+                <div class="quality-control" role="group" aria-label="Remote camera quality">
+                  <button type="button" data-remote-quality="360p" aria-pressed="false" disabled>360p</button>
+                  <button type="button" data-remote-quality="480p" aria-pressed="false" disabled>480p</button>
+                  <button type="button" data-remote-quality="720p" aria-pressed="true" disabled>720p</button>
+                  <button type="button" data-remote-quality="1080p" aria-pressed="false" disabled>1080p</button>
+                </div>
+                <p class="control-feedback" id="remote-quality-status" role="status" aria-live="polite">Connect to a camera to change quality.</p>
+                <p class="control-description" id="remote-recording-quality-estimate">About 1.1 GB per hour</p>
+              </div>
+
+              <div class="monitor-tool-group monitor-view-group">
+                <span class="monitor-tool-label">View</span>
+                <div class="monitor-button-row">
+                  <label class="monitor-toggle-button" for="toggle-mirror-view">
+                    <input type="checkbox" id="toggle-mirror-view" aria-label="Mirror remote video view" disabled>
+                    <span>Mirror</span>
+                  </label>
+                  <button type="button" class="monitor-tool-button" id="btn-rotate-view" aria-label="Rotate remote video to 90 degrees" disabled>
+                    Rotate <span id="rotation-val" aria-live="polite">0°</span>
+                  </button>
+                  <button type="button" class="monitor-tool-button" id="btn-toggle-fullscreen" aria-label="Enter full screen" aria-pressed="false" disabled>
+                    <span aria-hidden="true" id="fullscreen-icon">⛶</span>
+                    <span id="fullscreen-label">Fullscreen</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="monitor-tool-group monitor-image-group">
+                <div class="monitor-tool-heading">
+                  <label class="monitor-tool-label" for="control-zoom">Zoom</label>
+                  <span id="zoom-val">1x</span>
+                </div>
+                <input type="range" id="control-zoom" min="1" max="4" step="0.1" value="1" aria-label="Digital zoom" disabled>
+                <label class="monitor-inline-toggle" for="control-nightvision">
+                  <input type="checkbox" id="control-nightvision" aria-label="Night vision" disabled>
+                  <span>Night vision</span>
+                </label>
+              </div>
+
+              <div class="monitor-tool-group monitor-talk-group">
+                <span class="monitor-tool-label">Audio</span>
+                <button class="ptt-btn" id="btn-ptt" aria-label="Hold to talk to the camera" disabled>
+                  <span class="ptt-pulse" aria-hidden="true"></span>
+                  <span class="ptt-title">Talk</span>
+                  <span class="ptt-caption">Hold to speak</span>
+                </button>
+                <p class="control-feedback" id="talk-status" role="status" aria-live="polite">Connect to a camera to talk.</p>
+              </div>
             </div>
 
-            <div class="control-card monitor-control-card recording-card remote-recording-card monitor-recording-card">
-              <div class="control-header">
-                <span>Recording</span>
-                <time class="recording-timer" id="remote-recording-elapsed" datetime="PT0S">00:00</time>
-              </div>
-              <div class="recording-state-row">
+            <div class="monitor-recording-bar remote-recording-card">
+              <div class="monitor-recording-state">
                 <span class="recording-state-dot" aria-hidden="true"></span>
-                <span id="remote-recording-state">Connect to a camera to record</span>
+                <div>
+                  <span class="monitor-tool-label">Recording</span>
+                  <strong id="remote-recording-state">Connect to a camera to record</strong>
+                </div>
               </div>
+              <time class="recording-timer" id="remote-recording-elapsed" datetime="PT0S">00:00</time>
               <div class="recording-actions">
-                <button type="button" class="btn btn-primary" id="btn-start-remote-recording" disabled>Start Recording</button>
-                <button type="button" class="btn btn-danger" id="btn-stop-remote-recording" hidden disabled>Stop Recording</button>
+                <button type="button" class="btn btn-primary" id="btn-start-remote-recording" disabled>Start recording</button>
+                <button type="button" class="btn btn-danger" id="btn-stop-remote-recording" hidden disabled>Stop recording</button>
               </div>
               <p class="control-feedback" id="remote-recording-feedback" role="status" aria-live="polite"></p>
-              <p class="recording-quality-summary"><span>Camera quality</span><strong id="remote-recording-quality">720p</strong></p>
-              <p class="control-description" id="remote-recording-quality-estimate">About 1.1 GB per hour</p>
             </div>
-
-            <div class="control-card monitor-control-card">
-              <div class="switch-container">
-                <div>
-                  <h4>Mirror View</h4>
-                  <p class="control-description">Change this monitor only</p>
-                </div>
-                <label class="switch">
-                  <input type="checkbox" id="toggle-mirror-view" aria-label="Mirror remote video view">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-
-            <div class="control-card monitor-control-card rotate-control-card">
-              <div class="control-header">
-                <span>Orientation</span>
-                <span class="slider-val" id="rotation-val" aria-live="polite">0°</span>
-              </div>
-              <button type="button" class="btn btn-glass rotate-view-button" id="btn-rotate-view" aria-label="Rotate remote video to 90 degrees">
-                <span aria-hidden="true">↻</span>
-                Rotate
-              </button>
-            </div>
-
-            <div class="control-card monitor-control-card">
-              <div class="control-header">
-                <span>Digital Zoom</span>
-                <span class="slider-val" id="zoom-val">1x</span>
-              </div>
-              <div class="slider-container">
-                <input type="range" id="control-zoom" min="1" max="4" step="0.1" value="1" aria-label="Digital zoom">
-              </div>
-            </div>
-
-            <div class="control-card monitor-control-card">
-              <div class="switch-container">
-                <div>
-                  <h4>Night Vision</h4>
-                  <p class="control-description">Digital image enhancer</p>
-                </div>
-                <label class="switch">
-                  <input type="checkbox" id="control-nightvision" aria-label="Night vision">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-
-            <div class="control-card monitor-control-card monitor-talk-card">
-              <button class="ptt-btn" id="btn-ptt" aria-label="Hold to talk to the camera" disabled>
-                <div class="ptt-pulse"></div>
-                <span class="ptt-title">🎤 Talk</span>
-                <span class="ptt-caption">Press and hold to speak</span>
-              </button>
-            </div>
-          </div>
           </section>
         </div>
 
-        <!-- Sidebar alerts logs -->
         <aside class="alerts-sidebar motion-log-panel" aria-label="Recent motion logs">
           <div class="sidebar-title">
-            <span>Recent Motion Logs</span>
+            <span>Motion Logs</span>
             <span class="sidebar-count" id="alerts-count">0 logs</span>
           </div>
           <p class="motion-log-status" id="alerts-status" role="status" aria-live="polite">Loading motion events…</p>
