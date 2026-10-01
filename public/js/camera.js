@@ -350,10 +350,12 @@ function syncActiveRecordingQuality(track, fallback = requestedRecordingQuality)
 
 async function selectRecordingQuality(quality) {
   const normalized = VyntrixRecordingQuality.normalizeQuality(quality);
-  if (qualityChangeInProgress) return false;
+  if (qualityChangeInProgress || cameraSwitchInProgress) {
+    return { success: false, message: 'The camera is busy. Try again shortly.' };
+  }
   if (recordingIsActive() || recordingPhase === 'uploading') {
     updateRecordingQualityControls('Stop the current recording before changing quality.', true);
-    return false;
+    return { success: false, message: 'Stop the current recording before changing quality.' };
   }
   const track = localStream?.getVideoTracks?.()[0];
   if (!track) {
@@ -426,14 +428,15 @@ async function selectRecordingQuality(quality) {
       updateRecordingQualityControls(message);
     }
     publishCameraQuality();
+    updateRecordingQualityControls(message);
     return { success: true, ...appliedState, message };
   } catch (error) {
     requestedRecordingQuality = previousRequested;
     activeRecordingQuality = previousActive;
     console.warn('Recording quality could not be applied:', error?.name || 'Error');
     const message = 'This camera could not apply that quality. The previous quality is still active.';
-    updateRecordingQualityControls(message, true);
     const previousState = syncActiveRecordingQuality(track, previousActive);
+    updateRecordingQualityControls(message, true);
     return { success: false, ...previousState, message };
   } finally {
     qualityChangeInProgress = false;
@@ -545,7 +548,7 @@ function updateRecordingControls(message = '', isError = false) {
   startButton.hidden = recordingPhase !== 'idle';
   stopButton.hidden = recordingPhase === 'idle';
   startButton.disabled = !isStreaming || !recordingSupported || cameraSwitchInProgress
-    || cameraStopInProgress || recordingStorageState === 'full';
+    || qualityChangeInProgress || cameraStopInProgress || recordingStorageState === 'full';
   stopButton.disabled = recordingPhase !== 'recording';
   stopButton.textContent = recordingPhase === 'recording' ? 'Stop Recording' : 'Saving…';
   state.textContent = recordingPhase === 'recording'
@@ -567,12 +570,17 @@ async function startRecording() {
   if (!isStreaming || !localStream) {
     return { success: false, ...recordingStateSnapshot('Start the camera before recording.') };
   }
-  if (recordingPhase !== 'idle' || cameraSwitchInProgress) {
+  if (recordingPhase !== 'idle' || cameraSwitchInProgress || qualityChangeInProgress) {
     return { success: false, ...recordingStateSnapshot(
       recordingPhase === 'recording' ? 'Recording is already active.' : 'The camera is busy. Try again shortly.'
     ) };
   }
   await refreshRecordingStorageState();
+  // Recheck after awaiting storage: another command may have started or changed the track.
+  if (!isStreaming || !localStream || recordingPhase !== 'idle'
+    || cameraSwitchInProgress || qualityChangeInProgress || cameraStopInProgress) {
+    return { success: false, ...recordingStateSnapshot('The camera is busy. Try again shortly.') };
+  }
   if (recordingStorageState === 'full') {
     updateRecordingControls(RECORDING_STORAGE_FULL_MESSAGE, true);
     return { success: false, ...publishRecordingState('error', RECORDING_STORAGE_FULL_MESSAGE) };
@@ -1008,10 +1016,10 @@ async function switchCamera(facingMode) {
   if (!isStreaming || !localStream) {
     return { success: false, message: 'Start the Camera Console before switching cameras.' };
   }
-  if (cameraSwitchInProgress) {
+  if (cameraSwitchInProgress || qualityChangeInProgress) {
     return { success: false, message: 'A camera switch is already in progress.' };
   }
-  if (recordingIsActive()) {
+  if (recordingIsActive() || recordingPhase === 'uploading') {
     const message = 'Stop the current recording before switching cameras.';
     showCameraSwitchStatus(message, true);
     return { success: false, message };

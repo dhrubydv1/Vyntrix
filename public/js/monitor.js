@@ -190,6 +190,10 @@ function setupDOMListeners() {
   pttButton.addEventListener('keyup', (event) => {
     if (event.key === ' ' || event.key === 'Enter') stopTalking(event);
   });
+  window.addEventListener('blur', stopTalking);
+  document.addEventListener('visibilitychange', (event) => {
+    if (document.hidden) stopTalking(event);
+  });
 }
 
 function updateCameraNetworkState(message, isError = false) {
@@ -393,13 +397,20 @@ function updateMonitorControlAvailability() {
   const videoEl = document.getElementById('remote-video');
   const viewAvailable = cameraAvailable && Boolean(videoEl?.srcObject);
   const recordingBlocksCameraChanges = remoteRecordingState === 'recording'
-    || remoteRecordingState === 'uploading';
+    || remoteRecordingState === 'uploading' || remoteRecordingCommandInProgress;
+  const cameraChangeInProgress = remoteCameraSwitchInProgress || remoteQualityChangeInProgress;
+  const startRecording = document.getElementById('btn-start-remote-recording');
+  const stopRecording = document.getElementById('btn-stop-remote-recording');
+  if (startRecording) startRecording.disabled = !cameraAvailable || cameraChangeInProgress
+    || recordingBlocksCameraChanges || remoteRecordingStorageState === 'full';
+  if (stopRecording) stopRecording.disabled = !cameraAvailable || remoteRecordingCommandInProgress
+    || remoteRecordingState !== 'recording';
 
   document.querySelectorAll('[data-facing-mode]').forEach((button) => {
-    button.disabled = !cameraAvailable || remoteCameraSwitchInProgress || recordingBlocksCameraChanges;
+    button.disabled = !cameraAvailable || cameraChangeInProgress || recordingBlocksCameraChanges;
   });
   document.querySelectorAll('[data-remote-quality]').forEach((button) => {
-    button.disabled = !cameraAvailable || remoteQualityChangeInProgress || recordingBlocksCameraChanges;
+    button.disabled = !cameraAvailable || cameraChangeInProgress || recordingBlocksCameraChanges;
   });
 
   const mirror = document.getElementById('toggle-mirror-view');
@@ -417,13 +428,17 @@ function updateMonitorControlAvailability() {
   const talkAvailable = viewAvailable && peerConnection?.connectionState === 'connected'
     && micTrack?.readyState === 'live';
   if (talk) talk.disabled = !talkAvailable;
+  if (!talkAvailable) {
+    if (micTrack) micTrack.enabled = false;
+    talk?.classList.remove('active');
+  }
   if (!cameraAvailable) updateTalkStatus('Connect to a camera to talk.');
   else if (!micTrack) updateTalkStatus('Microphone access is required to talk.', true);
   else if (!talkAvailable) updateTalkStatus('Talk will be available when the live connection is ready.');
   else if (!talk?.classList.contains('active')) updateTalkStatus('Hold to speak.');
 }
 
-function updateRemoteFacingControls(facingMode = null, disabled = false) {
+function updateRemoteFacingControls(facingMode = null, disabled = remoteCameraSwitchInProgress) {
   if (VALID_FACING_MODES.has(facingMode)) remoteFacingMode = facingMode;
   document.querySelectorAll('[data-facing-mode]').forEach((button) => {
     button.setAttribute('aria-pressed', String(button.dataset.facingMode === remoteFacingMode));
@@ -434,8 +449,9 @@ function updateRemoteFacingControls(facingMode = null, disabled = false) {
 
 function updateRemoteRecordingQuality(quality = '720p', width = null, height = null, message = '', isError = false) {
   remoteRecordingQuality = VyntrixRecordingQuality.normalizeQuality(quality);
-  remoteVideoWidth = Number.isSafeInteger(width) && width > 0 ? width : remoteVideoWidth;
-  remoteVideoHeight = Number.isSafeInteger(height) && height > 0 ? height : remoteVideoHeight;
+  const hasResolution = Number.isSafeInteger(width) && width > 0 && Number.isSafeInteger(height) && height > 0;
+  remoteVideoWidth = hasResolution ? width : null;
+  remoteVideoHeight = hasResolution ? height : null;
   const qualityElement = document.getElementById('remote-recording-quality');
   const resolutionElement = document.getElementById('remote-stream-resolution');
   const status = document.getElementById('remote-quality-status');
@@ -557,7 +573,7 @@ function applyRemoteRecordingState(update = {}, { forceError = false } = {}) {
     const busy = remoteRecordingCommandInProgress;
     startButton.hidden = update.state === 'recording' || update.state === 'uploading';
     stopButton.hidden = update.state !== 'recording' && update.state !== 'uploading';
-    startButton.disabled = busy || !activeCameraSocketId || !socket?.connected
+    startButton.disabled = busy || remoteCameraSwitchInProgress || remoteQualityChangeInProgress || !activeCameraSocketId || !socket?.connected
       || remoteRecordingStorageState === 'full';
     stopButton.disabled = busy || update.state !== 'recording' || !socket?.connected;
     stopButton.textContent = update.state === 'uploading' ? 'Uploading…' : 'Stop Recording';
@@ -570,9 +586,12 @@ function requestRemoteRecordingState() {
     applyRemoteRecordingState({ state: 'idle' });
     return;
   }
+  const targetSocketId = activeCameraSocketId;
+  const attempt = monitorConnectionAttempt;
   socket.timeout(5000).emit('recording:state-request', {
-    targetSocketId: activeCameraSocketId
+    targetSocketId
   }, (timeoutError, response) => {
+    if (attempt !== monitorConnectionAttempt || targetSocketId !== activeCameraSocketId) return;
     if (timeoutError || !response?.success) {
       applyRemoteRecordingState({
         state: 'error',
@@ -585,16 +604,28 @@ function requestRemoteRecordingState() {
 }
 
 async function requestRemoteRecordingControl(action) {
-  if (!['start', 'stop'].includes(action) || remoteRecordingCommandInProgress) return;
+  if (!['start', 'stop'].includes(action) || remoteRecordingCommandInProgress
+    || remoteCameraSwitchInProgress || remoteQualityChangeInProgress) return;
   if (!socket?.connected || !activeCameraSocketId) {
     applyRemoteRecordingState({ state: 'error', message: 'Connect to a camera before recording.' }, { forceError: true });
     return;
   }
   if ((action === 'start' && ['recording', 'uploading'].includes(remoteRecordingState))
     || (action === 'stop' && remoteRecordingState !== 'recording')) return;
+  const targetSocketId = activeCameraSocketId;
+  const attempt = monitorConnectionAttempt;
+  remoteRecordingCommandInProgress = true;
+  updateMonitorControlAvailability();
   if (action === 'start') {
     await refreshRemoteRecordingStorageState();
+    if (attempt !== monitorConnectionAttempt || targetSocketId !== activeCameraSocketId) return;
+    if (!socket?.connected || ['recording', 'uploading'].includes(remoteRecordingState)) {
+      remoteRecordingCommandInProgress = false;
+      applyRemoteRecordingState({ state: remoteRecordingState });
+      return;
+    }
     if (remoteRecordingStorageState === 'full') {
+      remoteRecordingCommandInProgress = false;
       applyRemoteRecordingState({ state: 'error', message: RECORDING_STORAGE_FULL_MESSAGE }, { forceError: true });
       return;
     }
@@ -607,13 +638,14 @@ async function requestRemoteRecordingControl(action) {
     message: action === 'start' ? 'Starting recording…' : 'Stopping recording…'
   });
   socket.timeout(12000).emit('recording:control', {
-    targetSocketId: activeCameraSocketId,
+    targetSocketId,
     action
   }, (timeoutError, response) => {
+    if (attempt !== monitorConnectionAttempt || targetSocketId !== activeCameraSocketId) return;
     remoteRecordingCommandInProgress = false;
     if (timeoutError || !response?.success) {
       applyRemoteRecordingState({
-        state: VALID_RECORDING_STATES.has(response?.state) ? response.state : 'error',
+        state: VALID_RECORDING_STATES.has(response?.state) ? response.state : remoteRecordingState,
         startedAt: response?.startedAt || null,
         message: response?.message || 'The camera did not respond. Try again.'
       }, { forceError: true });
@@ -628,7 +660,8 @@ async function requestRemoteRecordingControl(action) {
 
 function requestRemoteQualityChange(quality) {
   const normalized = VyntrixRecordingQuality.normalizeQuality(quality);
-  if (normalized !== quality || remoteQualityChangeInProgress) return;
+  if (normalized !== quality || remoteQualityChangeInProgress || remoteCameraSwitchInProgress
+    || remoteRecordingCommandInProgress) return;
   if (remoteRecordingState === 'recording' || remoteRecordingState === 'uploading') {
     updateRemoteRecordingQuality(
       remoteRecordingQuality,
@@ -651,6 +684,8 @@ function requestRemoteQualityChange(quality) {
   }
 
   remoteQualityChangeInProgress = true;
+  const targetSocketId = activeCameraSocketId;
+  const attempt = monitorConnectionAttempt;
   updateRemoteRecordingQuality(
     remoteRecordingQuality,
     remoteVideoWidth,
@@ -658,9 +693,10 @@ function requestRemoteQualityChange(quality) {
     `Requesting ${normalized}…`
   );
   socket.timeout(12000).emit('camera:quality:set', {
-    targetSocketId: activeCameraSocketId,
+    targetSocketId,
     quality: normalized
   }, (timeoutError, response) => {
+    if (attempt !== monitorConnectionAttempt || targetSocketId !== activeCameraSocketId) return;
     remoteQualityChangeInProgress = false;
     if (timeoutError || !response?.success) {
       updateRemoteRecordingQuality(
@@ -689,7 +725,8 @@ function showRemoteCameraSwitchStatus(message = '', isError = false) {
 }
 
 function requestRemoteCameraSwitch(facingMode) {
-  if (!VALID_FACING_MODES.has(facingMode) || remoteCameraSwitchInProgress) return;
+  if (!VALID_FACING_MODES.has(facingMode) || remoteCameraSwitchInProgress
+    || remoteQualityChangeInProgress || remoteRecordingCommandInProgress) return;
   if (remoteRecordingState === 'recording' || remoteRecordingState === 'uploading') {
     showRemoteCameraSwitchStatus('Stop the current recording before switching cameras.', true);
     return;
@@ -700,16 +737,19 @@ function requestRemoteCameraSwitch(facingMode) {
   }
 
   remoteCameraSwitchInProgress = true;
+  const targetSocketId = activeCameraSocketId;
+  const attempt = monitorConnectionAttempt;
   updateRemoteFacingControls(null, true);
   showRemoteCameraSwitchStatus(`Requesting ${facingMode === 'user' ? 'front' : 'back'} camera…`);
   socket.timeout(12000).emit('camera:switch', {
-    targetSocketId: activeCameraSocketId,
+    targetSocketId,
     facingMode
   }, (timeoutError, result) => {
+    if (attempt !== monitorConnectionAttempt || targetSocketId !== activeCameraSocketId) return;
     remoteCameraSwitchInProgress = false;
     const response = timeoutError ? null : result;
-    if (response?.success) {
-      updateRemoteFacingControls(response.facingMode || facingMode);
+    if (response?.success && VALID_FACING_MODES.has(response.facingMode)) {
+      updateRemoteFacingControls(response.facingMode);
       if (response.quality && response.width && response.height) {
         updateRemoteRecordingQuality(response.quality, response.width, response.height);
       }
@@ -718,7 +758,7 @@ function requestRemoteCameraSwitch(facingMode) {
       return;
     }
     updateRemoteFacingControls(response?.facingMode || null);
-    showRemoteCameraSwitchStatus(response?.message || 'Camera could not be switched. Try again.', true);
+    showRemoteCameraSwitchStatus(response?.message || 'The camera did not confirm an applied lens. Try again.', true);
   });
 }
 
@@ -885,6 +925,16 @@ function playAlertNotification() {
 function renderCameraSelectionGrid(cameras, state = 'ready') {
   const container = document.getElementById('camera-list-container');
   if (!container) return;
+  if (activeCameraSocketId && !cameras.some(camera => camera.socketId === activeCameraSocketId)) {
+    cleanupPeerConnection();
+    activeCameraSocketId = null;
+    remoteVideoWidth = null;
+    remoteVideoHeight = null;
+    updateMonitorControlAvailability();
+    document.getElementById('monitor-portal-view').style.display = 'none';
+    document.getElementById('camera-selection-view').style.display = 'block';
+    updateMonitorStatus('disconnected');
+  }
 
   if (cameras.length === 0) {
     userNavigatedBack = false; // Reset block since all cameras went offline
@@ -896,15 +946,6 @@ function renderCameraSelectionGrid(cameras, state = 'ready') {
         ${state === 'error' ? '<a href="/monitor.html" class="btn btn-glass">Try Again</a>' : '<a href="/camera.html" target="_blank" rel="noopener" class="btn btn-glass">Open Camera Console</a>'}
       </div>
     `;
-    // If active camera went offline, return to list view
-    if (activeCameraSocketId) {
-      cleanupPeerConnection();
-      activeCameraSocketId = null;
-      updateMonitorControlAvailability();
-      document.getElementById('monitor-portal-view').style.display = 'none';
-      document.getElementById('camera-selection-view').style.display = 'block';
-      updateMonitorStatus('disconnected');
-    }
     return;
   }
 
@@ -958,6 +999,9 @@ function updateMonitorStatus(status) {
 
 function cleanupPeerConnection() {
   monitorConnectionAttempt += 1;
+  remoteCameraSwitchInProgress = false;
+  remoteQualityChangeInProgress = false;
+  remoteRecordingCommandInProgress = false;
   if (monitorReconnectTimer) {
     clearTimeout(monitorReconnectTimer);
     monitorReconnectTimer = null;
