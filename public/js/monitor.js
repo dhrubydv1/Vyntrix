@@ -22,9 +22,7 @@ let remoteRecordingQuality = '720p';
 let remoteVideoWidth = null;
 let remoteVideoHeight = null;
 let remoteQualityChangeInProgress = false;
-let remoteVideoRotation = 0;
-let remoteOrientationLayoutFrame = null;
-let remoteStageResizeObserver = null;
+let remoteCameraOrientation = null;
 
 const MONITOR_MIRROR_STORAGE_KEY = 'vyntrix.monitor.mirrorView';
 const VALID_FACING_MODES = new Set(['user', 'environment']);
@@ -90,10 +88,8 @@ function setupDOMListeners() {
   const zoomText = document.getElementById('zoom-val');
   const videoEl = document.getElementById('remote-video');
   const mirrorToggle = document.getElementById('toggle-mirror-view');
-  const rotateButton = document.getElementById('btn-rotate-view');
   mirrorToggle.checked = readBooleanPreference(MONITOR_MIRROR_STORAGE_KEY);
   applyRemoteMirror(mirrorToggle.checked);
-  setRemoteVideoRotation(0);
   updateRemoteRecordingQuality();
 
   videoEl.addEventListener('loadedmetadata', updateRemoteVideoLayout);
@@ -102,18 +98,8 @@ function setupDOMListeners() {
   videoEl.addEventListener('webkitendfullscreen', updateFullscreenControls);
   document.addEventListener('fullscreenchange', updateFullscreenControls);
   document.addEventListener('webkitfullscreenchange', updateFullscreenControls);
-  window.addEventListener('orientationchange', updateRemoteVideoLayout);
-  if (screen.orientation?.addEventListener) {
-    screen.orientation.addEventListener('change', updateRemoteVideoLayout);
-  }
-  const remoteStage = document.getElementById('remote-video-stage');
-  if ('ResizeObserver' in window && remoteStage) {
-    remoteStageResizeObserver = new ResizeObserver(scheduleRemoteOrientationBoundsUpdate);
-    remoteStageResizeObserver.observe(remoteStage);
-  }
   configureFullscreenControl();
   updateMonitorControlAvailability();
-  rotateButton.addEventListener('click', cycleRemoteVideoRotation);
 
   mirrorToggle.addEventListener('change', (event) => {
     const mirrored = event.target.checked;
@@ -227,79 +213,38 @@ function dimensionOrientation(width, height) {
 function updateRemoteVideoLayout() {
   const videoEl = document.getElementById('remote-video');
   const stage = document.getElementById('remote-video-stage');
-  const wrapper = document.getElementById('video-wrapper');
-  if (!videoEl || !stage || !wrapper || !videoEl.videoWidth || !videoEl.videoHeight) return;
-
-  const needsQuarterTurn = remoteVideoRotation === 90 || remoteVideoRotation === 270;
-  const width = needsQuarterTurn ? videoEl.videoHeight : videoEl.videoWidth;
-  const height = needsQuarterTurn ? videoEl.videoWidth : videoEl.videoHeight;
-  const orientation = dimensionOrientation(width, height);
+  if (!videoEl || !stage) return;
+  const hasDecodedDimensions = Number.isFinite(videoEl.videoWidth) && videoEl.videoWidth > 0
+    && Number.isFinite(videoEl.videoHeight) && videoEl.videoHeight > 0;
+  const width = hasDecodedDimensions ? videoEl.videoWidth : null;
+  const height = hasDecodedDimensions ? videoEl.videoHeight : null;
+  const orientation = hasDecodedDimensions
+    ? dimensionOrientation(width, height)
+    : remoteCameraOrientation;
+  if (!orientation) return;
   stage.classList.remove('is-portrait', 'is-landscape', 'is-square');
   stage.classList.add(`is-${orientation}`);
-  stage.style.setProperty('--remote-video-aspect-ratio', `${width} / ${height}`);
+  stage.style.setProperty('--remote-video-aspect-ratio', hasDecodedDimensions
+    ? `${width} / ${height}`
+    : orientation === 'portrait' ? '9 / 16' : orientation === 'landscape' ? '16 / 9' : '1 / 1');
   stage.dataset.videoOrientation = orientation;
-  wrapper.classList.toggle('is-remote-rotated', remoteVideoRotation !== 0);
-  wrapper.classList.toggle('is-remote-quarter-turned', needsQuarterTurn);
-  if (remoteVideoRotation !== 0) {
-    wrapper.style.setProperty('--remote-video-rotation', `${remoteVideoRotation}deg`);
-    stage.dataset.videoRotation = String(remoteVideoRotation);
-  } else {
-    wrapper.style.removeProperty('--remote-video-rotation');
-    delete stage.dataset.videoRotation;
-  }
-  scheduleRemoteOrientationBoundsUpdate();
 }
 
-function scheduleRemoteOrientationBoundsUpdate() {
-  if (remoteOrientationLayoutFrame !== null) {
-    cancelAnimationFrame(remoteOrientationLayoutFrame);
-  }
-  remoteOrientationLayoutFrame = requestAnimationFrame(() => {
-    remoteOrientationLayoutFrame = null;
-    const stage = document.getElementById('remote-video-stage');
-    const wrapper = document.getElementById('video-wrapper');
-    if (!stage || !wrapper || !wrapper.classList.contains('is-remote-rotated')) return;
-    const needsQuarterTurn = wrapper.classList.contains('is-remote-quarter-turned');
-    wrapper.style.setProperty('--remote-oriented-width', `${needsQuarterTurn ? stage.clientHeight : stage.clientWidth}px`);
-    wrapper.style.setProperty('--remote-oriented-height', `${needsQuarterTurn ? stage.clientWidth : stage.clientHeight}px`);
-  });
-}
-
-function setRemoteVideoRotation(rotation) {
-  remoteVideoRotation = ((rotation % 360) + 360) % 360;
-  const value = document.getElementById('rotation-val');
-  const button = document.getElementById('btn-rotate-view');
-  if (value) value.textContent = `${remoteVideoRotation}°`;
-  if (button) {
-    const nextRotation = (remoteVideoRotation + 90) % 360;
-    button.setAttribute('aria-label', `Rotate remote video to ${nextRotation} degrees`);
-    button.title = `Current orientation: ${remoteVideoRotation}°. Rotate to ${nextRotation}°.`;
-  }
+function updateRemoteCameraOrientation(update = {}) {
+  if (!['portrait', 'landscape', 'square'].includes(update.orientation)) return;
+  remoteCameraOrientation = update.orientation;
+  // Decoded video dimensions remain authoritative. Source state only prevents
+  // a fixed landscape placeholder before metadata arrives.
   updateRemoteVideoLayout();
-}
-
-function cycleRemoteVideoRotation() {
-  setRemoteVideoRotation(remoteVideoRotation + 90);
 }
 
 function resetRemoteVideoLayout() {
   const stage = document.getElementById('remote-video-stage');
-  const wrapper = document.getElementById('video-wrapper');
-  if (remoteOrientationLayoutFrame !== null) {
-    cancelAnimationFrame(remoteOrientationLayoutFrame);
-    remoteOrientationLayoutFrame = null;
-  }
+  remoteCameraOrientation = null;
   if (stage) {
     stage.classList.remove('is-portrait', 'is-landscape', 'is-square');
     stage.style.removeProperty('--remote-video-aspect-ratio');
     delete stage.dataset.videoOrientation;
-    delete stage.dataset.videoRotation;
-  }
-  if (wrapper) {
-    wrapper.classList.remove('is-remote-rotated', 'is-remote-quarter-turned');
-    wrapper.style.removeProperty('--remote-video-rotation');
-    wrapper.style.removeProperty('--remote-oriented-width');
-    wrapper.style.removeProperty('--remote-oriented-height');
   }
 }
 
@@ -414,12 +359,10 @@ function updateMonitorControlAvailability() {
   });
 
   const mirror = document.getElementById('toggle-mirror-view');
-  const rotate = document.getElementById('btn-rotate-view');
   const zoom = document.getElementById('control-zoom');
   const nightVision = document.getElementById('control-nightvision');
   const fullscreen = document.getElementById('btn-toggle-fullscreen');
   if (mirror) mirror.disabled = !viewAvailable;
-  if (rotate) rotate.disabled = !viewAvailable;
   if (zoom) zoom.disabled = !viewAvailable;
   if (nightVision) nightVision.disabled = !viewAvailable;
   if (fullscreen) fullscreen.disabled = !viewAvailable || !fullscreenSupported();
@@ -818,6 +761,7 @@ function connectSocket() {
       );
     }
     if (selectedCamera?.facingMode) updateRemoteFacingControls(selectedCamera.facingMode);
+    if (selectedCamera?.orientation) updateRemoteCameraOrientation(selectedCamera);
     if (selectedCamera?.recordingState) {
       applyRemoteRecordingState({
         state: selectedCamera.recordingState,
@@ -844,6 +788,11 @@ function connectSocket() {
       qualityUpdate.height,
       qualityUpdate.message || ''
     );
+  });
+
+  socket.on('camera:orientation', (orientationUpdate) => {
+    if (orientationUpdate?.cameraSocketId !== activeCameraSocketId) return;
+    updateRemoteCameraOrientation(orientationUpdate);
   });
 
   // Signal feedback from camera
@@ -1065,7 +1014,6 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
     return;
   }
   if (peerConnection && activeCameraSocketId === socketId) return;
-  const cameraChanged = !isReconnect && (activeCameraSocketId !== socketId || activeCameraName !== name);
   cleanupPeerConnection();
   const attempt = ++monitorConnectionAttempt;
   activeCameraSocketId = socketId;
@@ -1077,7 +1025,7 @@ async function initiateStreaming(socketId, name, isReconnect = false) {
     selectedCamera?.videoHeight || null
   );
   remoteFacingMode = VALID_FACING_MODES.has(selectedCamera?.facingMode) ? selectedCamera.facingMode : null;
-  if (cameraChanged) setRemoteVideoRotation(0);
+  updateRemoteCameraOrientation(selectedCamera || {});
   updateMonitorStatus(isReconnect ? 'reconnecting' : 'connecting');
 
   // Swap view states
@@ -1196,7 +1144,6 @@ function backToCameraList() {
   updateRemoteRecordingQuality(remoteRecordingQuality, null, null, 'Connect to a camera to change quality.');
   showRemoteCameraSwitchStatus();
   applyRemoteRecordingState({ state: 'idle' });
-  setRemoteVideoRotation(0);
 
   // Stop video element
   const videoEl = document.getElementById('remote-video');

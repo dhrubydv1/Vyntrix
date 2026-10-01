@@ -171,11 +171,9 @@ describe('monitor control state regressions', () => {
     r.run('setupDOMListeners()');
     const event = { preventDefault() {}, target: { checked: true, value: '2.5' } };
     r.element('toggle-mirror-view').listeners.change(event);
-    r.element('btn-rotate-view').listeners.click();
     r.element('control-zoom').listeners.input(event);
     r.element('control-nightvision').listeners.change(event);
     assert.equal(r.element('remote-video').classList.contains('video-mirrored'), true);
-    assert.equal(r.element('rotation-val').textContent, '90°');
     assert.equal(r.element('remote-video').style['--video-zoom'], 2.5);
     assert.equal(r.element('remote-video').classList.contains('night-vision-mode'), true);
     r.element('remote-video').srcObject = {};
@@ -184,6 +182,87 @@ describe('monitor control state regressions', () => {
     assert.equal(r.run('micTrack.enabled'), true);
     r.context.window.listeners.blur(event);
     assert.equal(r.run('micTrack.enabled'), false);
+  });
+
+  it('lays out portrait decoded video without rotating the presentation', () => {
+    const r = controlRuntime();
+    const video = r.element('remote-video');
+    video.videoWidth = 720;
+    video.videoHeight = 1280;
+    r.run('updateRemoteVideoLayout()');
+    assert.equal(r.element('remote-video-stage').dataset.videoOrientation, 'portrait');
+    assert.equal(r.element('remote-video-stage').style['--remote-video-aspect-ratio'], '720 / 1280');
+    assert.equal(r.element('remote-video-stage').dataset.videoRotation, undefined);
+  });
+
+  it('lays out landscape decoded video without rotating the presentation', () => {
+    const r = controlRuntime();
+    const video = r.element('remote-video');
+    video.videoWidth = 1280;
+    video.videoHeight = 720;
+    r.run('updateRemoteVideoLayout()');
+    assert.equal(r.element('remote-video-stage').dataset.videoOrientation, 'landscape');
+    assert.equal(r.element('remote-video-stage').style['--remote-video-aspect-ratio'], '1280 / 720');
+    assert.equal(r.element('remote-video-stage').dataset.videoRotation, undefined);
+  });
+
+  it('uses the authenticated source orientation only until decoded dimensions arrive', () => {
+    const r = controlRuntime();
+    r.run("updateRemoteCameraOrientation({orientation:'portrait'})");
+    assert.equal(r.element('remote-video-stage').dataset.videoOrientation, 'portrait');
+    r.element('remote-video').videoWidth = 1280;
+    r.element('remote-video').videoHeight = 720;
+    r.run('updateRemoteVideoLayout()');
+    assert.equal(r.element('remote-video-stage').dataset.videoOrientation, 'landscape');
+  });
+
+  it('keeps the safe default stage when both decoded and source orientation are unavailable', () => {
+    const r = controlRuntime();
+    r.run('updateRemoteCameraOrientation({orientation:"invalid"}); updateRemoteVideoLayout()');
+    assert.equal(r.element('remote-video-stage').dataset.videoOrientation, undefined);
+    assert.equal(r.run('peerConnection'), null);
+  });
+
+  it('updates orientation in-place while the same peer remains connected', () => {
+    const r = controlRuntime();
+    const video = r.element('remote-video');
+    video.videoWidth = 1280;
+    video.videoHeight = 720;
+    r.run("var livePeer={connectionState:'connected'}; peerConnection=livePeer; updateRemoteVideoLayout()");
+    video.videoWidth = 720;
+    video.videoHeight = 1280;
+    r.run('updateRemoteVideoLayout()');
+    assert.equal(r.element('remote-video-stage').dataset.videoOrientation, 'portrait');
+    assert.equal(r.run('peerConnection===livePeer'), true);
+  });
+
+  it('keeps mirror, zoom, and fullscreen independent of automatic orientation', async () => {
+    const r = controlRuntime();
+    const video = r.element('remote-video');
+    video.videoWidth = 720;
+    video.videoHeight = 1280;
+    r.run("applyRemoteMirror(true); document.getElementById('remote-video').style.setProperty('--video-zoom', 2); updateRemoteVideoLayout()");
+    const stage = r.element('remote-video-stage');
+    stage.requestFullscreen = async () => { r.context.document.fullscreenElement = stage; };
+    await r.run('toggleMonitorFullscreen()');
+    assert.equal(video.classList.contains('video-mirrored'), true);
+    assert.equal(video.style['--video-zoom'], 2);
+    assert.equal(r.run('monitorIsFullscreen()'), true);
+    assert.equal(stage.dataset.videoOrientation, 'portrait');
+  });
+
+  it('publishes Android screen orientation through the authenticated camera state', () => {
+    const r = controlRuntime(cameraScript);
+    r.context.screen.orientation = { type: 'portrait-primary' };
+    r.run("var sent=[]; socket={connected:true,emit(name,payload){sent.push({name,payload});}}; localStream={getVideoTracks:()=>[{getSettings:()=>({width:1280,height:720})}]}; publishCameraOrientation(true)");
+    assert.equal(r.run("sent.find(event => event.name === 'camera:orientation').payload.orientation"), 'portrait');
+  });
+
+  it('uses iOS viewport orientation when the Screen Orientation API is unavailable', () => {
+    const r = controlRuntime(cameraScript);
+    r.context.window.matchMedia = () => ({ matches: true });
+    r.run("var sent=[]; socket={connected:true,emit(name,payload){sent.push({name,payload});}}; localStream={getVideoTracks:()=>[{getSettings:()=>({width:1280,height:720})}]}; publishCameraOrientation(true)");
+    assert.equal(r.run("sent.find(event => event.name === 'camera:orientation').payload.orientation"), 'portrait');
   });
 
   it('requests real fullscreen and disables it when the browser lacks support', async () => {
@@ -199,13 +278,16 @@ describe('monitor control state regressions', () => {
     assert.equal(r.run('monitorIsFullscreen()'), true);
   });
 
-  for (const facing of ['user', 'environment']) {
+  for (const [facing, width, height, orientation] of [
+    ['user', 720, 1280, 'portrait'],
+    ['environment', 1280, 720, 'landscape']
+  ]) {
     it(`switches to ${facing} using replaceTrack while retaining the peer and audio`, async () => {
       const r = controlRuntime(cameraScript);
       r.run(`
         var oldTrack={kind:'video',getSettings:()=>({deviceId:'old',facingMode:'${facing === 'user' ? 'environment' : 'user'}'}),
           removeEventListener(){},stop(){this.stopped=true;}};
-        var newTrack={kind:'video',label:'${facing === 'user' ? 'Front' : 'Back'}',getSettings:()=>({deviceId:'new',facingMode:'${facing}',width:1280,height:720}),addEventListener(){},stop(){}};
+        var newTrack={kind:'video',label:'${facing === 'user' ? 'Front' : 'Back'}',getSettings:()=>({deviceId:'new',facingMode:'${facing}',width:${width},height:${height}}),addEventListener(){},stop(){}};
         var audio={kind:'audio'};
         var MediaStream=class {constructor(tracks){this.tracks=tracks;} getTracks(){return this.tracks;}
           getVideoTracks(){return this.tracks.filter(t=>t.kind==='video');} getAudioTracks(){return this.tracks.filter(t=>t.kind==='audio');}};
@@ -215,6 +297,7 @@ describe('monitor control state regressions', () => {
         var sender={track:oldTrack,async replaceTrack(track){this.track=track;}};
         var peer={getSenders:()=>[sender]}; peerConnections.monitor=peer;
         localStream=new MediaStream([oldTrack,audio]); isStreaming=true;
+        var orientationEvents=[]; socket={connected:true,emit(name,payload){if(name==='camera:orientation')orientationEvents.push(payload);}};
         activeFacingMode='${facing === 'user' ? 'environment' : 'user'}';
         supportedRecordingMimeType=()=>'';
         updateCameraDiagnostics=()=>{};
@@ -226,6 +309,7 @@ describe('monitor control state regressions', () => {
       assert.equal(r.run('sender.track===newTrack && peerConnections.monitor===peer'), true);
       assert.equal(r.run('localStream.getAudioTracks()[0]===audio'), true);
       assert.equal(r.run('oldTrack.stopped'), true);
+      assert.equal(r.run(`orientationEvents.some(event => event.orientation === '${orientation}')`), true);
     });
   }
 
@@ -292,12 +376,15 @@ describe('remote recording frontend wiring', () => {
     assert.match(monitorScript, /emit\('camera:quality:set'/);
     assert.match(monitorScript, /requestRemoteCameraSwitch/);
     assert.match(monitorScript, /applyRemoteMirror/);
-    assert.match(monitorScript, /cycleRemoteVideoRotation/);
+    assert.match(monitorScript, /updateRemoteCameraOrientation/);
     assert.match(monitorScript, /--video-zoom/);
     assert.match(monitorScript, /night-vision-mode/);
     assert.match(monitorScript, /micTrack\.enabled = true/);
     assert.match(cameraScript, /on\('camera:quality:set'/);
     assert.match(cameraScript, /track\?\.getSettings/);
     assert.doesNotMatch(monitorScript, /new RTCPeerConnection[\s\S]*requestRemoteQualityChange/);
+    assert.doesNotMatch(monitorHtml, /btn-rotate-view|rotation-val|>Rotate/);
+    assert.doesNotMatch(monitorScript, /remoteVideoRotation|cycleRemoteVideoRotation|setRemoteVideoRotation|is-remote-rotated/);
+    assert.match(cameraScript, /camera:orientation/);
   });
 });

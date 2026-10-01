@@ -376,6 +376,13 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     const initialCameras = await registerDevice(monitor, 'monitor');
     assert.strictEqual(initialCameras[0].recordingQuality, '720p');
 
+    const orientationUpdate = waitForEvent(monitor, 'camera:orientation');
+    camera.emit('camera:orientation', { orientation: 'portrait' });
+    assert.deepStrictEqual(await orientationUpdate, {
+      cameraSocketId: camera.id,
+      orientation: 'portrait'
+    });
+
     const qualityUpdate = waitForEvent(monitor, 'camera:quality');
     camera.emit('camera:quality', { quality: '1080p' });
     const update = await qualityUpdate;
@@ -418,6 +425,7 @@ describe('Actual Vyntrix server Socket.IO integration', () => {
     assert.strictEqual(finalCameras[0].recordingQuality, '480p');
     assert.strictEqual(finalCameras[0].videoWidth, 854);
     assert.strictEqual(finalCameras[0].videoHeight, 480);
+    assert.strictEqual(finalCameras[0].orientation, 'portrait');
 
     const unsupported = await emitWithAck(monitor, 'camera:quality:set', {
       targetSocketId: camera.id,

@@ -2309,47 +2309,11 @@ header {
   background: #000;
 }
 
-.monitor-video-container .video-wrapper.is-remote-rotated {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: var(--remote-oriented-width);
-  height: var(--remote-oriented-height);
-  max-width: none;
-  transform: translate(-50%, -50%) rotate(var(--remote-video-rotation));
-  transform-origin: center;
-}
-
-/* A quarter-turn maps the video's local Y axis to the screen's horizontal
-   axis. Mirror that axis so Mirror View remains a horizontal presentation
-   flip after manual rotation. */
-.video-wrapper.is-remote-quarter-turned #remote-video.video-mirrored {
-  --video-mirror-x: 1;
-  transform: scaleY(-1) scale(var(--video-zoom));
-}
-
-.rotate-view-button {
-  width: 100%;
-  min-height: 44px;
-  gap: 0.45rem;
-}
-
 .monitor-video-container #remote-video {
   object-fit: contain;
   object-position: center;
 }
 
-.monitor-video-container.is-portrait {
-  width: 100%;
-  height: clamp(520px, 72vh, 820px);
-  aspect-ratio: auto;
-}
-
-.monitor-video-container.is-square {
-  width: 100%;
-  height: min(70vh, 720px);
-  aspect-ratio: auto;
-}
 
 .overlay-timestamp {
   top: 0.75rem;
@@ -3092,15 +3056,6 @@ footer {
   }
 }
 
-@media (max-width: 700px) {
-  .monitor-video-container.is-portrait,
-  .monitor-video-container.is-square {
-    height: min(72svh, 680px);
-    min-height: 430px;
-  }
-
-}
-
 .monitor-video-container:fullscreen,
 .monitor-video-container:-webkit-full-screen {
   width: 100vw !important;
@@ -3125,11 +3080,6 @@ footer {
   background: #000;
 }
 
-.monitor-video-container:fullscreen .video-wrapper.is-remote-rotated,
-.monitor-video-container:-webkit-full-screen .video-wrapper.is-remote-rotated {
-  width: var(--remote-oriented-width);
-  height: var(--remote-oriented-height);
-}
 
 /* V1 product states and interaction polish */
 .connection-banner {
@@ -3429,6 +3379,18 @@ footer {
   border-radius: 8px;
   background: #000;
   box-shadow: none;
+}
+
+.monitor-page .monitor-video-container.is-portrait {
+  width: min(100%, calc(min(72vh, 820px) * 9 / 16));
+  max-height: min(72vh, 820px);
+  margin-inline: auto;
+}
+
+.monitor-page .monitor-video-container.is-square {
+  width: min(100%, min(70vh, 720px));
+  max-height: min(70vh, 720px);
+  margin-inline: auto;
 }
 
 .monitor-page .monitor-video-container #remote-video {
@@ -3848,6 +3810,18 @@ footer {
 
   .monitor-page .motion-log-panel .alerts-list {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .monitor-page .monitor-video-container.is-portrait {
+    width: min(100%, calc(min(72svh, 680px) * 9 / 16));
+    max-height: min(72svh, 680px);
+  }
+
+  .monitor-page .monitor-video-container.is-square {
+    width: min(100%, min(72svh, 680px));
+    max-height: min(72svh, 680px);
   }
 }
 

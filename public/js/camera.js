@@ -30,6 +30,7 @@ let recordingStorageState = 'unknown';
 let recordingStorageRefreshPromise = null;
 let requestedRecordingQuality = '720p';
 let activeRecordingQuality = '720p';
+let lastPublishedCameraOrientation = null;
 
 const deviceFacingHints = new Map();
 
@@ -348,6 +349,31 @@ function syncActiveRecordingQuality(track, fallback = requestedRecordingQuality)
   };
 }
 
+function cameraOrientationState(track = localStream?.getVideoTracks?.()[0]) {
+  const screenType = typeof screen !== 'undefined' ? screen.orientation?.type : null;
+  if (typeof screenType === 'string') {
+    if (screenType.startsWith('portrait')) return { orientation: 'portrait' };
+    if (screenType.startsWith('landscape')) return { orientation: 'landscape' };
+  }
+  const isPortraitViewport = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(orientation: portrait)').matches
+    : null;
+  if (typeof isPortraitViewport === 'boolean') return { orientation: isPortraitViewport ? 'portrait' : 'landscape' };
+  const settings = track?.getSettings?.() || {};
+  const orientation = Number.isFinite(settings.width) && Number.isFinite(settings.height)
+    ? settings.height > settings.width ? 'portrait' : settings.width > settings.height ? 'landscape' : 'square'
+    : null;
+  return orientation ? { orientation } : null;
+}
+
+function publishCameraOrientation(force = false) {
+  const state = cameraOrientationState();
+  if (!socket?.connected || !state) return;
+  if (!force && state.orientation === lastPublishedCameraOrientation) return;
+  lastPublishedCameraOrientation = state.orientation;
+  socket.emit('camera:orientation', state);
+}
+
 async function selectRecordingQuality(quality) {
   const normalized = VyntrixRecordingQuality.normalizeQuality(quality);
   if (qualityChangeInProgress || cameraSwitchInProgress) {
@@ -454,6 +480,7 @@ function publishCameraQuality() {
     quality: state.quality,
     ...(state.width && state.height ? { width: state.width, height: state.height } : {})
   });
+  publishCameraOrientation();
 }
 
 function applyRecordingStorageState(storage) {
@@ -1221,8 +1248,10 @@ function connectSocket() {
       recordingQuality: activeVideoState.quality,
       videoWidth: activeVideoState.width,
       videoHeight: activeVideoState.height,
-      facingMode: activeFacingMode
+      facingMode: activeFacingMode,
+      orientation: cameraOrientationState()?.orientation
     });
+    lastPublishedCameraOrientation = cameraOrientationState()?.orientation || null;
     publishRecordingState(recordingPublicState, recordingPublicMessage);
     if (isStreaming) {
       updateCameraStatus('streaming');
@@ -1238,6 +1267,11 @@ function connectSocket() {
       showCameraOperationMessage('Reconnecting to Vyntrix…');
     }
   });
+
+  window.addEventListener('orientationchange', () => publishCameraOrientation());
+  if (screen.orientation?.addEventListener) {
+    screen.orientation.addEventListener('change', () => publishCameraOrientation());
+  }
 
   signalingSocket.on('connect_error', (error) => {
     console.error('Signaling connection failed:', error);

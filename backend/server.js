@@ -313,6 +313,7 @@ const activeCameras = {}; // socket.id -> camera registration and recording stat
 const RECORDING_STATES = new Set(['idle', 'recording', 'uploading', 'uploaded', 'error']);
 const RECORDING_QUALITIES = new Set(['360p', '480p', '720p', '1080p']);
 const VALID_FACING_MODES = new Set(['user', 'environment']);
+const VALID_ORIENTATIONS = new Set(['portrait', 'landscape', 'square']);
 const isVideoDimension = (value) => Number.isSafeInteger(value) && value > 0 && value <= 16384;
 
 const toAlertResponse = (alert) => ({
@@ -334,6 +335,7 @@ const getCamerasForUser = (userId) => {
       videoWidth: cam.videoWidth,
       videoHeight: cam.videoHeight,
       facingMode: cam.facingMode,
+      orientation: cam.orientation,
       recordingState: cam.recordingState,
       recordingStartedAt: cam.recordingStartedAt
     }));
@@ -359,7 +361,8 @@ io.on('connection', (socket) => {
     recordingQuality,
     videoWidth,
     videoHeight,
-    facingMode
+    facingMode,
+    orientation
   } = {}) => {
     if (type !== 'camera' && type !== 'monitor') {
       socket.emit('app-error', 'Invalid device type');
@@ -384,6 +387,7 @@ io.on('connection', (socket) => {
         videoWidth: isVideoDimension(videoWidth) ? videoWidth : null,
         videoHeight: isVideoDimension(videoHeight) ? videoHeight : null,
         facingMode: VALID_FACING_MODES.has(facingMode) ? facingMode : null,
+        orientation: VALID_ORIENTATIONS.has(orientation) ? orientation : null,
         recordingState: 'idle',
         recordingStartedAt: null,
         recordingCommandPending: null,
@@ -414,6 +418,18 @@ io.on('connection', (socket) => {
       cameraSocketId: socket.id,
       quality,
       ...(isVideoDimension(width) && isVideoDimension(height) ? { width, height } : {})
+    });
+    io.to(`user_${socket.userId}`).emit('camera-list-update', getCamerasForUser(socket.userId));
+  });
+
+  socket.on('camera:orientation', ({ orientation } = {}) => {
+    if (socket.deviceType !== 'camera' || !socket.userId || !VALID_ORIENTATIONS.has(orientation)) return;
+    const camera = activeCameras[socket.id];
+    if (!camera || camera.userId !== socket.userId) return;
+    camera.orientation = orientation;
+    io.to(`user_${socket.userId}`).emit('camera:orientation', {
+      cameraSocketId: socket.id,
+      orientation
     });
     io.to(`user_${socket.userId}`).emit('camera-list-update', getCamerasForUser(socket.userId));
   });
